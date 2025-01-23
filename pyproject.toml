@@ -1,0 +1,23 @@
+[tool.black]
+line-length = 88
+target-version = ['py37']
+include = '\.pyi?$'
+extend-exclude = '''
+# A regex preceded with ^/ will apply only to files and directories
+# in the root of the project.
+^/foo.py  # exclude a file named foo.py in the root of the project
+^/virtual/   # exclude venv directory
+^/venv/   # exclude venv directory
+^/env/    # exclude env directory
+^/.venv/  # exclude .venv directory
+^/ENV/    # exclude ENV directory
+'''
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+line_length = 88
+
+[tool.flake8]
+max-line-length = 88
+extend-ignore = "E203"
