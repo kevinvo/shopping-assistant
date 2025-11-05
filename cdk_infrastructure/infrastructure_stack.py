@@ -57,7 +57,7 @@ DEFAULT_SCRAPER_STAGE_CONFIG_PATH = (
 )
 
 
-class RedditScraperStack(Stack):
+class ShoppingAssistantInfrastructureStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
 

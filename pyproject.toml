@@ -36,5 +36,5 @@ module = "lambda.*"
 ignore_errors = false
 
 [[tool.mypy.overrides]]
-module = "cdk_stack.*"
+module = "cdk_infrastructure.*"
 ignore_errors = false

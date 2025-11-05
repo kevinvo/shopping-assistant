@@ -218,7 +218,7 @@ async def _execute_full_flow(websocket_url: str, timeout: int) -> bool:
     return False
 
 
-@pytest.mark.skip(reason="Disabled temporarily to unblock CI/CD deployments")
+# @pytest.mark.skip(reason="Disabled temporarily to unblock CI/CD deployments")
 @pytest.mark.unit
 def test_full_flow(timeout=240):
     """Test complete WebSocket chat flow with monitoring."""

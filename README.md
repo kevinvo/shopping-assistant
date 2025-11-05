@@ -68,7 +68,7 @@ The application is built on AWS using a serverless architecture with the followi
    - Scheduled functions for data processing
    - SQS consumers for async message processing
 
-2. **CDK Stack** (`cdk_stack/`): Infrastructure as code
+2. **CDK Infrastructure** (`cdk_infrastructure/`): Infrastructure as code
    - S3 buckets for raw and processed data
    - DynamoDB tables for sessions and metadata
    - SQS queues for async processing
@@ -161,7 +161,7 @@ WEBSOCKET_STAGE=chalice-test
 Deploy the AWS infrastructure:
 
 ```bash
-cd cdk_stack
+cd cdk_infrastructure
 cdk deploy --all
 ```
 
@@ -356,9 +356,9 @@ shopping-assistant-agent/
 │   ├── scripts/                   # Deployment scripts
 │   ├── tests/                     # Application tests
 │   └── .chalice/                  # Chalice configuration
-├── cdk_stack/                     # AWS CDK infrastructure
+├── cdk_infrastructure/            # AWS CDK infrastructure
 │   ├── __init__.py
-│   └── reddit_scraper_stack.py   # Main stack definition
+│   └── infrastructure_stack.py   # Main stack definition
 ├── glue_scripts/                  # AWS Glue batch jobs
 │   ├── process_top_data.py
 │   └── process_top_daily_data.py
@@ -436,16 +436,16 @@ Maintain code quality with:
 
 ```bash
 # Format code
-black chalice_app/ cdk_stack/ glue_scripts/
+black chalice_app/ cdk_infrastructure/ glue_scripts/
 
 # Lint and auto-fix
-ruff check --fix chalice_app/ cdk_stack/ glue_scripts/
+ruff check --fix chalice_app/ cdk_infrastructure/ glue_scripts/
 
 # Security scan
-bandit -r chalice_app/ cdk_stack/ glue_scripts/
+bandit -r chalice_app/ cdk_infrastructure/ glue_scripts/
 
 # Type checking
-mypy chalice_app/ cdk_stack/
+mypy chalice_app/ cdk_infrastructure/
 ```
 
 See `CODE_QUALITY.md` for detailed instructions.
