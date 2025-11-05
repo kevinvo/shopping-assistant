@@ -38,12 +38,12 @@ GLUE_SCRIPTS_BUCKET_NAME = "shopping-assistant-glue-scripts"
 REDDIT_POSTS_TABLE_NAME = "reddit-posts"
 REDDIT_POSTS_TEST_TABLE_NAME = "reddit-posts-test"
 
-# Define a constant for the Lambda runtime
-LAMBDA_RUNTIME = lambda_.Runtime.PYTHON_3_9
-
 # Define constants for Glue resources
 GLUE_DATABASE_NAME = "reddit_data"
 GLUE_TABLE_NAME = "reddit_data_table"
+
+# Define a constant for the Lambda runtime
+LAMBDA_RUNTIME = lambda_.Runtime.PYTHON_3_9
 
 # Define constant for alerts email
 ALERTS_EMAIL_ADDRESS = "vodangkhoa@gmail.com"  # Replace with your actual email address
