@@ -347,7 +347,7 @@ shopping-assistant-agent/
 │   │   │   └── sqs.py            # SQS consumers
 │   │   ├── websocket.py          # WebSocket handlers
 │   │   ├── chat.py               # Chat processing logic
-│   │   ├── chat_processor.py     # Message processor
+│   │   ├── chat_message_service.py  # Message processor
 │   │   ├── llm.py                # LLM integration
 │   │   ├── indexers/             # Vector indexing
 │   │   ├── reranker/             # LLM reranking

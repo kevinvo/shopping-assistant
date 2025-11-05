@@ -11,7 +11,7 @@ import pandas as pd
 logger = setup_logger(__name__)
 
 
-class DataProcessor:
+class RedditPostIngestor:
     def __init__(self):
         self.raw_reddit_s3_handler = S3Handler(
             bucket_name=config.s3_raw_reddit_bucket_name
@@ -77,5 +77,5 @@ class DataProcessor:
 
 
 if __name__ == "__main__":
-    # DataProcessor().process_top_posts()
-    DataProcessor().process_daily_posts()
+    # RedditPostIngestor().process_top_posts()
+    RedditPostIngestor().process_daily_posts()

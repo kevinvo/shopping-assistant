@@ -117,7 +117,7 @@ def chat_processor(event):
     """Process chat messages from SQS queue."""
     try:
         # event is an SQSEvent object - iterate directly
-        from chalicelib.chat_processor import process_message
+        from chalicelib.chat_message_service import process_message
         from chalicelib.data_objects import MessagePayload
 
         record_count = 0

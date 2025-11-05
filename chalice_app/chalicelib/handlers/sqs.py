@@ -23,7 +23,7 @@ def register_sqs_handlers(app):
         Now uses the migrated Chat class and chat processor directly.
         """
         try:
-            from chalicelib.chat_processor import process_message
+            from chalicelib.chat_message_service import process_message
             from chalicelib.data_objects import MessagePayload
 
             # For each SQS record, process the message directly
