@@ -420,6 +420,33 @@ class AppConfig:
     websocket_domain: str
 ```
 
+### CDK Context
+
+Infrastructure resource names (buckets, DynamoDB tables, Glue database/table, etc.) are loaded from CDK context. The defaults live in `cdk.json` under `context.infrastructure`:
+
+```json
+{
+  "context": {
+    "infrastructure": {
+      "raw_reddit_data_bucket_name": "shopping-assistant-raw-reddit-data",
+      "raw_reddit_test_data_bucket_name": "shopping-assistant-raw-test-reddit-data",
+      "processed_reddit_data_bucket_name": "shopping-assistant-processed-reddit-data",
+      "processed_reddit_test_data_bucket_name": "shopping-assistant-processed-test-reddit-data",
+      "glue_scripts_bucket_name": "shopping-assistant-glue-scripts",
+      "reddit_posts_table_name": "reddit-posts",
+      "reddit_posts_test_table_name": "reddit-posts-test",
+      "glue_database_name": "reddit_data",
+      "glue_table_name": "reddit_data_table",
+      "alerts_email_address": "your-alerts@example.com"
+    }
+  }
+}
+```
+
+- Adjust the values prior to `cdk synth`/`cdk deploy` if you need different resource names.
+- To manage multiple environments, add `defaults` and an `environments` map inside `context.infrastructure`, then deploy with `cdk deploy -c infrastructure_env=<env>` to select the override.
+- Missing keys cause deployment to fail early with a descriptive error.
+
 ## CI/CD
 
 The project uses GitHub Actions for continuous integration:

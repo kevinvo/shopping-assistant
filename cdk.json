@@ -1,3 +1,17 @@
 {
-    "app": "python3 app.py"
+    "app": "python3 app.py",
+    "context": {
+        "infrastructure": {
+            "raw_reddit_data_bucket_name": "shopping-assistant-raw-reddit-data",
+            "raw_reddit_test_data_bucket_name": "shopping-assistant-raw-test-reddit-data",
+            "processed_reddit_data_bucket_name": "shopping-assistant-processed-reddit-data",
+            "processed_reddit_test_data_bucket_name": "shopping-assistant-processed-test-reddit-data",
+            "glue_scripts_bucket_name": "shopping-assistant-glue-scripts",
+            "reddit_posts_table_name": "reddit-posts",
+            "reddit_posts_test_table_name": "reddit-posts-test",
+            "glue_database_name": "reddit_data",
+            "glue_table_name": "reddit_data_table",
+            "alerts_email_address": "vodangkhoa@gmail.com"
+        }
+    }
 }

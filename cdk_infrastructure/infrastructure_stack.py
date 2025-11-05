@@ -1,4 +1,5 @@
 import json
+from dataclasses import dataclass
 from pathlib import Path
 
 from aws_cdk import (
@@ -26,27 +27,53 @@ from aws_cdk import (
 from constructs import Construct
 import time
 
-# S3 bucket names
-RAW_REDDIT_DATA_BUCKET_NAME = "shopping-assistant-raw-reddit-data"
-RAW_REDDIT_TEST_DATA_BUCKET_NAME = "shopping-assistant-raw-test-reddit-data"
-
-PROCESSED_REDDIT_DATA_BUCKET_NAME = "shopping-assistant-processed-reddit-data"
-PROCESSED_REDDIT_TEST_DATA_BUCKET_NAME = "shopping-assistant-processed-test-reddit-data"
-GLUE_SCRIPTS_BUCKET_NAME = "shopping-assistant-glue-scripts"
-
-# DynamoDB configurations
-REDDIT_POSTS_TABLE_NAME = "reddit-posts"
-REDDIT_POSTS_TEST_TABLE_NAME = "reddit-posts-test"
-
-# Define constants for Glue resources
-GLUE_DATABASE_NAME = "reddit_data"
-GLUE_TABLE_NAME = "reddit_data_table"
-
 # Define a constant for the Lambda runtime
 LAMBDA_RUNTIME = lambda_.Runtime.PYTHON_3_9
 
-# Define constant for alerts email
-ALERTS_EMAIL_ADDRESS = "vodangkhoa@gmail.com"  # Replace with your actual email address
+
+@dataclass(frozen=True)
+class InfrastructureContextValues:
+    raw_reddit_data_bucket_name: str
+    raw_reddit_test_data_bucket_name: str
+    processed_reddit_data_bucket_name: str
+    processed_reddit_test_data_bucket_name: str
+    glue_scripts_bucket_name: str
+    reddit_posts_table_name: str
+    reddit_posts_test_table_name: str
+    glue_database_name: str
+    glue_table_name: str
+    alerts_email_address: str
+
+    @classmethod
+    def from_stack(cls, stack: Stack) -> "InfrastructureContextValues":
+        context_root = stack.node.try_get_context("infrastructure") or {}
+
+        if "defaults" in context_root or "environments" in context_root:
+            values: dict[str, str] = dict(context_root.get("defaults", {}))
+            env_name = stack.node.try_get_context(
+                "infrastructure_env"
+            ) or context_root.get("default_environment")
+            if env_name:
+                environments = context_root.get("environments", {})
+                if env_name not in environments:
+                    raise ValueError(
+                        "Infrastructure context missing environment configuration for "
+                        f"'{env_name}'."
+                    )
+                values.update(environments.get(env_name, {}))
+        else:
+            values = dict(context_root)
+
+        required_keys = list(cls.__annotations__.keys())
+        missing = [key for key in required_keys if not values.get(key)]
+        if missing:
+            formatted = ", ".join(missing)
+            raise ValueError(
+                "Missing required infrastructure context values: "
+                f"{formatted}. Define them under context.infrastructure in cdk.json."
+            )
+
+        return cls(**{key: values[key] for key in required_keys})
 
 
 DEFAULT_SCRAPER_STAGE_CONFIG_PATH = (
@@ -60,6 +87,9 @@ DEFAULT_SCRAPER_STAGE_CONFIG_PATH = (
 class ShoppingAssistantInfrastructureStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
+
+        context_values = InfrastructureContextValues.from_stack(self)
+        self.context_values = context_values
 
         # 1. Create VPC and networking first
         self.vpc = ec2.Vpc(
@@ -93,26 +123,29 @@ class ShoppingAssistantInfrastructureStack(Stack):
         self.alerts_topic = self.create_alerts_topic()
 
         # Add email subscription to the alerts topic
-        self.add_email_subscription_to_alerts_topic(ALERTS_EMAIL_ADDRESS)
+        self.add_email_subscription_to_alerts_topic(context_values.alerts_email_address)
 
         # Initialize S3 buckets first
         self.raw_data_bucket = self.create_s3_bucket(
-            bucket_name=RAW_REDDIT_DATA_BUCKET_NAME, id="RawRedditData"
+            bucket_name=context_values.raw_reddit_data_bucket_name,
+            id="RawRedditData",
         )
         self.raw_test_data_bucket = self.create_s3_bucket(
-            bucket_name=RAW_REDDIT_TEST_DATA_BUCKET_NAME, id="RawRedditTestData"
+            bucket_name=context_values.raw_reddit_test_data_bucket_name,
+            id="RawRedditTestData",
         )
         self.processed_data_bucket = self.create_s3_bucket(
-            bucket_name=PROCESSED_REDDIT_DATA_BUCKET_NAME, id="ProcessedRedditData"
+            bucket_name=context_values.processed_reddit_data_bucket_name,
+            id="ProcessedRedditData",
         )
         self.processed_test_data_bucket = self.create_s3_bucket(
-            bucket_name=PROCESSED_REDDIT_TEST_DATA_BUCKET_NAME,
+            bucket_name=context_values.processed_reddit_test_data_bucket_name,
             id="ProcessedRedditTestData",
         )
 
         # Create the Glue scripts bucket
         self.glue_scripts_bucket = self.create_s3_bucket(
-            bucket_name=GLUE_SCRIPTS_BUCKET_NAME, id="GlueScriptsBucket"
+            bucket_name=context_values.glue_scripts_bucket_name, id="GlueScriptsBucket"
         )
 
         # Deploy Glue scripts to S3
@@ -125,7 +158,9 @@ class ShoppingAssistantInfrastructureStack(Stack):
             None  # Placeholder - not used by Chalice-managed functions
         )
 
-        self.reddit_database = self.create_glue_database()
+        self.reddit_database = self.create_glue_database(
+            name=context_values.glue_database_name
+        )
         self.create_glue_crawler(database=self.reddit_database)
         self.create_processed_data_glue_crawler(database=self.reddit_database)
 
@@ -141,13 +176,16 @@ class ShoppingAssistantInfrastructureStack(Stack):
         CfnOutput(
             self,
             id="GlueTableName",
-            value="merged_data",
+            value=context_values.glue_table_name,
             description="The name of the Glue table for Reddit data",
         )
 
-        self.create_dynamodb_table(table_name=REDDIT_POSTS_TABLE_NAME, id="RedditPosts")
         self.create_dynamodb_table(
-            table_name=REDDIT_POSTS_TEST_TABLE_NAME, id="RedditPostsTest"
+            table_name=context_values.reddit_posts_table_name, id="RedditPosts"
+        )
+        self.create_dynamodb_table(
+            table_name=context_values.reddit_posts_test_table_name,
+            id="RedditPostsTest",
         )
 
         self.create_glue_job()
@@ -157,7 +195,9 @@ class ShoppingAssistantInfrastructureStack(Stack):
         self.create_scraper_state_machines()
 
         # Create the Glue table with the specified schema
-        self.create_glue_table(database=self.reddit_database)
+        self.create_glue_table(
+            database=self.reddit_database, table_name=context_values.glue_table_name
+        )
 
         # Create Sessions Table first
         self.sessions_table = dynamodb.Table(
@@ -302,13 +342,13 @@ class ShoppingAssistantInfrastructureStack(Stack):
             versioned=True,
         )
 
-    def create_glue_database(self) -> glue.CfnDatabase:
+    def create_glue_database(self, *, name: str) -> glue.CfnDatabase:
         return glue.CfnDatabase(
             self,
             id="RedditDatabase",
             catalog_id=Stack.of(self).account,
             database_input=glue.CfnDatabase.DatabaseInputProperty(
-                name=GLUE_DATABASE_NAME, description="Database for Reddit scraping data"
+                name=name, description="Database for Reddit scraping data"
             ),
         )
 
@@ -404,7 +444,7 @@ class ShoppingAssistantInfrastructureStack(Stack):
             iam.PolicyStatement(
                 actions=["dynamodb:PutItem"],
                 resources=[
-                    f"arn:aws:dynamodb:{self.region}:{self.account}:table/{REDDIT_POSTS_TABLE_NAME}"
+                    f"arn:aws:dynamodb:{self.region}:{self.account}:table/{self.context_values.reddit_posts_table_name}"
                 ],
             )
         )
@@ -424,7 +464,8 @@ class ShoppingAssistantInfrastructureStack(Stack):
         )
 
         # Grant specific S3 read permissions to the Glue role
-        script_bucket_arn = f"arn:aws:s3:::{GLUE_SCRIPTS_BUCKET_NAME}/*"
+        script_bucket_name = self.context_values.glue_scripts_bucket_name
+        script_bucket_arn = f"arn:aws:s3:::{script_bucket_name}/*"
         glue_role.add_to_policy(
             iam.PolicyStatement(
                 actions=["s3:GetObject"],
@@ -440,14 +481,14 @@ class ShoppingAssistantInfrastructureStack(Stack):
             role=glue_role.role_arn,
             command=glue.CfnJob.JobCommandProperty(
                 name="glueetl",
-                script_location=f"s3://{GLUE_SCRIPTS_BUCKET_NAME}/process_top_daily_data.py",
+                script_location=f"s3://{script_bucket_name}/process_top_daily_data.py",
                 python_version="3",
             ),
             default_arguments={
                 "--job-language": "python",
                 "--enable-metrics": "",
                 "--enable-continuous-cloudwatch-log": "true",
-                "--extra-py-files": f"s3://{GLUE_SCRIPTS_BUCKET_NAME}/glue_constants.py",
+                "--extra-py-files": f"s3://{script_bucket_name}/glue_constants.py",
             },
             glue_version="5.0",  # Specify the Glue version
             max_retries=1,
@@ -474,7 +515,8 @@ class ShoppingAssistantInfrastructureStack(Stack):
         )
 
         # Grant specific S3 read permissions to the Glue role
-        script_bucket_arn = f"arn:aws:s3:::{GLUE_SCRIPTS_BUCKET_NAME}/*"
+        script_bucket_name = self.context_values.glue_scripts_bucket_name
+        script_bucket_arn = f"arn:aws:s3:::{script_bucket_name}/*"
         glue_role.add_to_policy(
             iam.PolicyStatement(
                 actions=["s3:GetObject"],
@@ -490,14 +532,14 @@ class ShoppingAssistantInfrastructureStack(Stack):
             role=glue_role.role_arn,
             command=glue.CfnJob.JobCommandProperty(
                 name="glueetl",
-                script_location=f"s3://{GLUE_SCRIPTS_BUCKET_NAME}/process_top_data.py",
+                script_location=f"s3://{script_bucket_name}/process_top_data.py",
                 python_version="3",
             ),
             default_arguments={
                 "--job-language": "python",
                 "--enable-metrics": "",
                 "--enable-continuous-cloudwatch-log": "true",
-                "--extra-py-files": f"s3://{GLUE_SCRIPTS_BUCKET_NAME}/glue_constants.py",
+                "--extra-py-files": f"s3://{script_bucket_name}/glue_constants.py",
             },
             glue_version="5.0",  # Specify the Glue version
             max_retries=1,
@@ -725,14 +767,14 @@ class ShoppingAssistantInfrastructureStack(Stack):
             versioned=False,
         )
 
-    def create_glue_table(self, *, database: glue.CfnDatabase):
+    def create_glue_table(self, *, database: glue.CfnDatabase, table_name: str):
         glue.CfnTable(
             self,
             id="RedditDataTable",
             catalog_id=Stack.of(self).account,
             database_name=database.ref,
             table_input=glue.CfnTable.TableInputProperty(
-                name=GLUE_TABLE_NAME,
+                name=table_name,
                 description="Table for Reddit data",
                 storage_descriptor=glue.CfnTable.StorageDescriptorProperty(
                     columns=[
@@ -794,7 +836,7 @@ class ShoppingAssistantInfrastructureStack(Stack):
             environment={
                 "ENVIRONMENT": "prod",
                 "ATHENA_OUTPUT_BUCKET": self.athena_results_bucket.bucket_name,
-                "ATHENA_DATABASE": GLUE_DATABASE_NAME,
+                "ATHENA_DATABASE": self.context_values.glue_database_name,
                 "TABLE_NAME": "merged_data",
                 "LOG_LEVEL": "INFO",
             },
@@ -862,9 +904,9 @@ class ShoppingAssistantInfrastructureStack(Stack):
                 resources=[
                     f"arn:aws:athena:{self.region}:{self.account}:workgroup/primary",
                     f"arn:aws:glue:{self.region}:{self.account}:catalog",
-                    f"arn:aws:glue:{self.region}:{self.account}:database/{GLUE_DATABASE_NAME}",
+                    f"arn:aws:glue:{self.region}:{self.account}:database/{self.context_values.glue_database_name}",
                     f"arn:aws:glue:{self.region}:{self.account}:database/default",
-                    f"arn:aws:glue:{self.region}:{self.account}:table/{GLUE_DATABASE_NAME}/*",
+                    f"arn:aws:glue:{self.region}:{self.account}:table/{self.context_values.glue_database_name}/*",
                     f"arn:aws:glue:{self.region}:{self.account}:table/default/*",
                 ],
             )
