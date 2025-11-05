@@ -5,7 +5,7 @@ Run with: pytest chalice_app/tests/test_retrieval_metrics.py -v
 """
 import pytest
 
-from chalicelib.retrieval_metrics import RetrievalMetrics
+from chalicelib.llm.metrics import RetrievalMetrics
 from dataclasses import asdict, dataclass
 
 

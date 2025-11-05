@@ -1,7 +1,7 @@
 import os
 
 from chalicelib.indexers.indexer_factory import IndexerFactory, IndexerType
-from chalicelib.logger_config import setup_logger
+from chalicelib.core.logger_config import setup_logger
 
 logger = setup_logger(__name__)
 

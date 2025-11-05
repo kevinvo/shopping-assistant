@@ -2,13 +2,13 @@ from langchain_openai import OpenAIEmbeddings
 from typing import List, Dict, Any
 from langchain.schema import Document
 from dataclasses import dataclass
-from chalicelib.config import config
-from chalicelib.logger_config import setup_logger
+from chalicelib.core.config import config
+from chalicelib.core.logger_config import setup_logger
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
 import uuid
 from rank_bm25 import BM25Okapi
-from chalicelib.performance_timer import measure_execution_time
+from chalicelib.core.performance_timer import measure_execution_time
 from pydantic import SecretStr
 
 logger = setup_logger(__name__)

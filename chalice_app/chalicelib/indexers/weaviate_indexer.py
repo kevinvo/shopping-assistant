@@ -1,15 +1,17 @@
-from langchain_openai import OpenAIEmbeddings
-from typing import List, Dict, Any
-from langchain.schema import Document
+import uuid
 from dataclasses import dataclass
-from chalicelib.config import config
-from chalicelib.logger_config import setup_logger
+from typing import Any, Dict, List
+
+from langchain.schema import Document
+from langchain_openai import OpenAIEmbeddings
+from pydantic import SecretStr
+from rank_bm25 import BM25Okapi
 from weaviate.auth import AuthApiKey
 from weaviate.client import Client
-import uuid
-from rank_bm25 import BM25Okapi
-from chalicelib.performance_timer import measure_execution_time
-from pydantic import SecretStr
+
+from chalicelib.core.config import config
+from chalicelib.core.logger_config import setup_logger
+from chalicelib.core.performance_timer import measure_execution_time
 
 logger = setup_logger(__name__)
 

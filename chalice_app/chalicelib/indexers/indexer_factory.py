@@ -1,7 +1,7 @@
 from typing import Union, Optional
 import os
 
-from chalicelib.logger_config import setup_logger
+from chalicelib.core.logger_config import setup_logger
 from enum import Enum  # noqa: E402
 
 from .weaviate_indexer import WeaviateIndexer  # noqa: E402

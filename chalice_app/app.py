@@ -13,13 +13,13 @@ from datetime import datetime, timezone
 import boto3
 
 # Import all handlers and WebSocket functions at module level
-from chalicelib.handlers.rest import register_rest_routes
-from chalicelib.handlers.websocket import (
+from chalicelib.api.rest import register_rest_routes
+from chalicelib.api.websocket import (
     handle_websocket_connect,
     handle_websocket_disconnect,
     handle_websocket_message,
 )
-from chalicelib.error_notifications import notify_on_exception
+from chalicelib.core.error_notifications import notify_on_exception
 
 # Configure logging
 logger = logging.getLogger()
@@ -43,9 +43,7 @@ def scraper_worker(event, context):
     """Execute the daily Reddit scraper. Intended for Step Functions invocation."""
     try:
         logger.info("Scraper worker invoked", extra={"event": event})
-        from chalicelib.handlers.background.jobs.scraper_handler import (
-            run_daily_scraper,
-        )
+        from chalicelib.jobs.scraper import run_daily_scraper
 
         result = run_daily_scraper()
         logger.info("Scraper worker completed", extra={"result": result})
@@ -117,8 +115,8 @@ def chat_processor(event):
     """Process chat messages from SQS queue."""
     try:
         # event is an SQSEvent object - iterate directly
-        from chalicelib.chat_message_service import process_message
-        from chalicelib.data_objects import MessagePayload
+        from chalicelib.sessions.chat_message_service import process_message
+        from chalicelib.models.data_objects import MessagePayload
 
         record_count = 0
         for record in event:
@@ -153,10 +151,8 @@ def evaluator(event):
     """Process evaluation tasks from SQS queue."""
     try:
         # event is an SQSEvent object - iterate directly
-        from chalicelib.handlers.background.jobs.evaluator_handler import (
-            process_evaluation_task,
-        )
-        from chalicelib.data_objects import EvaluationMessage
+        from chalicelib.jobs.evaluator import process_evaluation_task
+        from chalicelib.models.data_objects import EvaluationMessage
 
         processed = 0
         failed = 0
@@ -227,9 +223,7 @@ def indexer(event):
     try:
         logger.info("Starting daily Reddit indexing job")
 
-        from chalicelib.handlers.background.jobs.indexer_handler import (
-            run_daily_indexer,
-        )
+        from chalicelib.jobs.indexer import run_daily_indexer
 
         result = run_daily_indexer()
         logger.info(f"Indexer completed: {result.get('statusCode')}")
@@ -251,7 +245,7 @@ def glue_starter(event):
     try:
         logger.info("Starting daily Glue job")
 
-        from chalicelib.handlers.background.jobs.glue_handler import start_glue_job
+        from chalicelib.jobs.glue import start_glue_job
 
         result = start_glue_job()
         logger.info(f"Glue job started: {result.get('statusCode')}")
@@ -266,7 +260,7 @@ def glue_starter(event):
 def layer_cleanup(event):
     """Weekly cleanup for Lambda layer artifacts stored in S3."""
     try:
-        from chalicelib.handlers.background.jobs.layer_cleanup_handler import (
+        from chalicelib.jobs.layer_cleanup import (
             LayerCleanupConfig,
             cleanup_old_layer_artifacts,
         )
