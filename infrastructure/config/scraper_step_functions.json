@@ -1,0 +1,26 @@
+{
+    "chalice-dev": {
+        "lambda_function_name": "shopping-assistant-api-chalice-dev-scraper_worker",
+        "state_machine_name": "shopping-assistant-api-chalice-dev-scraper",
+        "state_machine_arn": "arn:aws:states:ap-southeast-1:979920756619:stateMachine:shopping-assistant-api-chalice-dev-scraper",
+        "region": "ap-southeast-1",
+        "account": "979920756619",
+        "ssm_parameter": "/shopping-assistant/chalice-dev/scraper-state-machine-arn"
+    },
+    "chalice-test": {
+        "lambda_function_name": "shopping-assistant-api-chalice-test-scraper_worker",
+        "state_machine_name": "shopping-assistant-api-chalice-test-scraper",
+        "state_machine_arn": "arn:aws:states:ap-southeast-1:979920756619:stateMachine:shopping-assistant-api-chalice-test-scraper",
+        "region": "ap-southeast-1",
+        "account": "979920756619",
+        "ssm_parameter": "/shopping-assistant/chalice-test/scraper-state-machine-arn"
+    },
+    "chalice-prod": {
+        "lambda_function_name": "shopping-assistant-api-chalice-prod-scraper_worker",
+        "state_machine_name": "shopping-assistant-api-chalice-prod-scraper",
+        "state_machine_arn": "arn:aws:states:ap-southeast-1:979920756619:stateMachine:shopping-assistant-api-chalice-prod-scraper",
+        "region": "ap-southeast-1",
+        "account": "979920756619",
+        "ssm_parameter": "/shopping-assistant/chalice-prod/scraper-state-machine-arn"
+    }
+}

@@ -1,0 +1,191 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  AWS_REGION: ap-southeast-1  # Updated to Singapore region
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20.x'
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements_dev.txt
+        pip install -r requirements.txt  # Root requirements.txt (migrated from lambda/)
+        pip install chalice  # Install Chalice for deployment
+        npm install -g aws-cdk@latest
+        sudo apt-get update && sudo apt-get install -y jq
+
+    - name: Code Formatting (Black)
+      run: |
+        black --check chalice_app/ cdk_stack/ glue_scripts/
+
+    - name: Linting (Ruff)
+      run: |
+        ruff check chalice_app/ cdk_stack/ glue_scripts/
+
+    - name: Security Check (Bandit)
+      run: |
+        bandit -r chalice_app/ cdk_stack/ glue_scripts/ -ll
+
+    - name: Type Checking (MyPy)
+      continue-on-error: true
+      run: |
+        mypy chalice_app/ cdk_stack/ glue_scripts/ || echo "MyPy found type issues (non-blocking)"
+
+    - name: Run Tests
+      run: |
+        pytest -v --tb=short --cov=chalice_app --cov-report=term-missing chalice_app/tests
+
+    - name: Check Python Syntax
+      run: |
+        python -m py_compile $(find . -name "*.py" -not -path "./venv/*" -not -path "./layer/*" -not -path "./.venv/*" -not -path "./cdk.out/*" -not -path "./__pycache__/*")
+
+    - name: Verify Docker
+      run: docker --version
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+
+    - name: Build Chalice Lambda Layer
+      run: |
+        chmod +x chalice_app/scripts/build-layer.sh
+        bash chalice_app/scripts/build-layer.sh
+
+    - name: CDK Synth
+      run: cdk synth
+
+    - name: Security Scan with cdk-nag
+      run: |
+        npm install -g cdk-nag
+        cdk synth --aspects node_modules/cdk-nag/lib/aspects/index.js
+
+    - name: CDK Deploy (Infrastructure)
+      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      run: cdk deploy --require-approval never
+      # CDK deploys infrastructure: S3, DynamoDB, SQS, EventBridge, VPC, IAM roles
+    
+    - name: Publish Lambda Layer
+      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      working-directory: chalice_app
+      run: |
+        python scripts/publish_layer.py shopping-assistant-chalice-layer --region ${{ env.AWS_REGION }}
+    
+    - name: Prune API Gateway invoke permissions
+      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      run: |
+        python .github/scripts/prune_lambda_policy.py --stage chalice-test --region ${{ env.AWS_REGION }}
+    
+    - name: Deploy Chalice stage with validation
+      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      run: |
+        python chalice_app/scripts/deploy_chalice_stage.py --stage chalice-test --region ${{ env.AWS_REGION }}
+
+    - name: Verify and Fix Layer Attachment
+      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      working-directory: chalice_app
+      run: |
+        echo "Performing final verification of layer attachment..."
+        STAGE="chalice-test"
+        REGION="${{ env.AWS_REGION }}"
+        LAYER_NAME="shopping-assistant-chalice-layer"
+        
+        # Get latest layer ARN
+        LAYER_ARN=$(aws lambda list-layer-versions \
+            --layer-name "$LAYER_NAME" \
+            --region "$REGION" \
+            --max-items 1 \
+            --query 'LayerVersions[0].LayerVersionArn' \
+            --output text)
+        
+        # Get all functions
+        FUNCTIONS=$(aws lambda list-functions \
+            --region "$REGION" \
+            --query "Functions[?starts_with(FunctionName, 'shopping-assistant-api-${STAGE}')].FunctionName" \
+            --output text)
+        
+        MISSING_COUNT=0
+        MISSING_FUNCTIONS=""
+        
+        for FUNCTION in $FUNCTIONS; do
+          LAYERS=$(aws lambda get-function-configuration \
+              --function-name "$FUNCTION" \
+              --region "$REGION" \
+              --query 'Layers[*].Arn' \
+              --output text)
+          
+          if echo "$LAYERS" | grep -q "$LAYER_NAME"; then
+            echo "✅ $FUNCTION - Layer attached"
+          else
+            echo "❌ $FUNCTION - Layer MISSING"
+            MISSING_COUNT=$((MISSING_COUNT + 1))
+            MISSING_FUNCTIONS="$MISSING_FUNCTIONS $FUNCTION"
+          fi
+        done
+        
+        if [ $MISSING_COUNT -gt 0 ]; then
+          echo "::warning::$MISSING_COUNT function(s) are missing the Lambda layer!"
+          echo "Attempting to re-attach layer..."
+          
+          # Try to re-attach the layer
+          bash scripts/post-deploy-attach-layer.sh "$STAGE" "$REGION" "$LAYER_NAME"
+          
+          # Wait a bit for propagation
+          echo "Waiting 10 seconds for changes to propagate..."
+          sleep 10
+          
+          # Verify again
+          MISSING_COUNT=0
+          for FUNCTION in $FUNCTIONS; do
+            LAYERS=$(aws lambda get-function-configuration \
+                --function-name "$FUNCTION" \
+                --region "$REGION" \
+                --query 'Layers[*].Arn' \
+                --output text)
+            
+            if echo "$LAYERS" | grep -q "$LAYER_NAME"; then
+              echo "✅ $FUNCTION - Layer now attached"
+            else
+              echo "❌ $FUNCTION - Layer still MISSING"
+              MISSING_COUNT=$((MISSING_COUNT + 1))
+            fi
+          done
+          
+          if [ $MISSING_COUNT -gt 0 ]; then
+            echo "::error::Failed to attach layer to $MISSING_COUNT function(s) after retry!"
+            echo "Functions still missing layer:$MISSING_FUNCTIONS"
+            echo "Please manually attach the layer via AWS Console or run:"
+            echo "  bash scripts/post-deploy-attach-layer.sh $STAGE $REGION"
+            exit 1
+          else
+            echo "✅ Successfully fixed layer attachment for all functions"
+          fi
+        else
+          echo "✅ All functions verified to have the layer attached"
+        fi

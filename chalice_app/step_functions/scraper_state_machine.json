@@ -1,0 +1,26 @@
+{
+    "Comment": "Scraper workflow that runs the existing Lambda and retries transient failures",
+    "StartAt": "RunScraper",
+    "States": {
+        "RunScraper": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Parameters": {
+                "FunctionName": "${SCRAPER_LAMBDA_ARN}",
+                "Payload.$": "$"
+            },
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "States.ALL"
+                    ],
+                    "IntervalSeconds": 5,
+                    "MaxAttempts": 3,
+                    "BackoffRate": 2.0
+                }
+            ],
+            "ResultPath": null,
+            "End": true
+        }
+    }
+}

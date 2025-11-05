@@ -1,0 +1,5 @@
+.chalice/deployed/
+.chalice/deployments/
+chalice_package/
+layer/
+layer.zip

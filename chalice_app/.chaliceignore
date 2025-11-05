@@ -1,0 +1,30 @@
+# Ignore test files from deployment
+tests/
+*.pyc
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+env/
+.venv/
+venv/
+*.log
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Ignore requirements.txt (dependencies provided by Lambda layer)
+requirements.txt
+.requirements.txt.template
+
+# Ignore layer build artifacts (layer will be attached separately)
+layer/
+lambda-layer/
+layer.zip
+Dockerfile
+
+# Ignore Chalice packaging artifacts
+chalice_package/
+
+# Ignore layer ARN file (generated dynamically during layer publish)
+.chalice/layer-arn.txt

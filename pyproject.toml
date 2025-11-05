@@ -1,6 +1,6 @@
 [tool.black]
 line-length = 88
-target-version = ['py37']
+target-version = ['py39']
 include = '\.pyi?$'
 extend-exclude = '''
 # A regex preceded with ^/ will apply only to files and directories
@@ -21,3 +21,20 @@ line_length = 88
 [tool.flake8]
 max-line-length = 88
 extend-ignore = "E203"
+
+[tool.mypy]
+python_version = "3.9"
+ignore_missing_imports = true
+warn_return_any = false
+warn_unused_configs = true
+disallow_untyped_defs = false
+check_untyped_defs = false
+no_implicit_optional = false
+
+[[tool.mypy.overrides]]
+module = "lambda.*"
+ignore_errors = false
+
+[[tool.mypy.overrides]]
+module = "cdk_stack.*"
+ignore_errors = false

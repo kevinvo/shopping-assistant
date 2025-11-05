@@ -1,0 +1,89 @@
+{
+  "version": "2.0",
+  "app_name": "shopping-assistant-api",
+  "stages": {
+    "dev": {
+      "api_gateway_stage": "api",
+      "environment_variables": {
+        "SESSIONS_TABLE_V2_NAME": "SessionsTableV2",
+        "CONNECTIONS_TABLE_NAME": "WebSocketConnectionsV2",
+        "ENVIRONMENT": "dev",
+        "LOG_LEVEL": "DEBUG",
+        "SCRAPER_STATE_MACHINE_ARN": "arn:aws:states:ap-southeast-1:000000000000:stateMachine:dev-shopping-assistant-scraper",
+        "SCRAPER_WORKER_LAMBDA_ARN": "arn:aws:lambda:ap-southeast-1:000000000000:function:shopping-assistant-api-dev-scraper_worker",
+        "LAYER_ARTIFACTS_BUCKET_NAME": "shopping-assistant-layers-ap-southeast-1",
+        "LAYER_ARTIFACTS_PREFIX": "lambda-layers/",
+        "LAYER_ARTIFACTS_RETENTION_DAYS": "7",
+        "LAYER_ARTIFACTS_MIN_VERSIONS": "5"
+      },
+      "autogen_policy": false,
+      "iam_policy_file": "policy-dev.json",
+      "lambda_timeout": 120,
+      "lambda_memory_size": 512
+    },
+    "chalice-test": {
+      "api_gateway_stage": "chalice-test",
+      "runtime": "python3.10",
+      "environment_variables": {
+        "SESSIONS_TABLE_V2_NAME": "SessionsTableV2",
+        "CONNECTIONS_TABLE_NAME": "WebSocketConnectionsV2",
+        "CHAT_PROCESSING_QUEUE_URL": "https://sqs.ap-southeast-1.amazonaws.com/979920756619/ChatProcessingQueue",
+        "EVALUATION_QUEUE_URL": "https://sqs.ap-southeast-1.amazonaws.com/979920756619/shopping-assistant-evaluation-queue",
+        "WEBSOCKET_DOMAIN": "o5b5iy8371.execute-api.ap-southeast-1.amazonaws.com",
+        "WEBSOCKET_STAGE": "chalice-test",
+        "ERROR_ALERT_TOPIC_ARN": "arn:aws:sns:ap-southeast-1:979920756619:job-failure-alerts",
+        "GLUE_JOB_NAME": "Daily-Reddit-Data-Process-Top-Job",
+        "ENVIRONMENT": "chalice-test",
+        "LOG_LEVEL": "INFO",
+        "ATHENA_OUTPUT_BUCKET": "redditscraperstack-athenaqueryresultsbucketae74152-mgcdqkp31f3b",
+        "SCRAPER_STATE_MACHINE_ARN": "arn:aws:states:ap-southeast-1:979920756619:stateMachine:shopping-assistant-api-chalice-test-scraper",
+        "SCRAPER_WORKER_LAMBDA_ARN": "arn:aws:lambda:ap-southeast-1:979920756619:function:shopping-assistant-api-chalice-test-scraper_worker",
+        "LAYER_ARTIFACTS_BUCKET_NAME": "shopping-assistant-layers-ap-southeast-1",
+        "LAYER_ARTIFACTS_PREFIX": "lambda-layers/",
+        "LAYER_ARTIFACTS_RETENTION_DAYS": "7",
+        "LAYER_ARTIFACTS_MIN_VERSIONS": "5"
+      },
+      "autogen_policy": false,
+      "iam_policy_file": "policy-chalice-test.json",
+      "lambda_timeout": 300,
+      "lambda_memory_size": 512,
+      "lambda_functions": {
+        "scraper_worker": {
+          "lambda_timeout": 900
+        },
+        "indexer": {
+          "lambda_timeout": 900
+        }
+      }
+    },
+    "prod": {
+      "api_gateway_stage": "prod",
+      "environment_variables": {
+        "SESSIONS_TABLE_V2_NAME": "SessionsTableV2",
+        "CONNECTIONS_TABLE_NAME": "WebSocketConnectionsV2",
+        "ENVIRONMENT": "prod",
+        "LOG_LEVEL": "INFO",
+        "ERROR_ALERT_TOPIC_ARN": "arn:aws:sns:ap-southeast-1:979920756619:job-failure-alerts",
+        "ATHENA_OUTPUT_BUCKET": "redditscraperstack-athenaqueryresultsbucketae74152-mgcdqkp31f3b",
+        "SCRAPER_STATE_MACHINE_ARN": "arn:aws:states:ap-southeast-1:979920756619:stateMachine:shopping-assistant-api-prod-scraper",
+        "SCRAPER_WORKER_LAMBDA_ARN": "arn:aws:lambda:ap-southeast-1:979920756619:function:shopping-assistant-api-prod-scraper_worker",
+        "LAYER_ARTIFACTS_BUCKET_NAME": "shopping-assistant-layers-ap-southeast-1",
+        "LAYER_ARTIFACTS_PREFIX": "lambda-layers/",
+        "LAYER_ARTIFACTS_RETENTION_DAYS": "7",
+        "LAYER_ARTIFACTS_MIN_VERSIONS": "5"
+      },
+      "autogen_policy": false,
+      "iam_policy_file": "policy-prod.json",
+      "lambda_timeout": 300,
+      "lambda_memory_size": 512,
+      "lambda_functions": {
+        "scraper_worker": {
+          "lambda_timeout": 900
+        },
+        "indexer": {
+          "lambda_timeout": 900
+        }
+      }
+    }
+  }
+}
