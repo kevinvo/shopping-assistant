@@ -5,7 +5,7 @@ from enum import Enum
 from openai import OpenAI
 import anthropic
 from chalicelib.config import AppConfig
-from chalicelib.performance import measure_execution_time
+from chalicelib.performance_timer import measure_execution_time
 from chalicelib.data_objects import ChatMessage
 from langsmith import traceable
 from langchain_openai import ChatOpenAI

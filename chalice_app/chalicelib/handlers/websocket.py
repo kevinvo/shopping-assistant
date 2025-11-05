@@ -14,7 +14,7 @@ from typing import Optional
 from chalice import WebsocketDisconnectedError
 from chalicelib.dynamo_tables import ConnectionInfo
 from chalicelib.data_objects import MessagePayload, ResponsePayload
-from chalicelib.logging_utils import LogExtra
+from chalicelib.structured_logging import LogExtra
 import boto3
 from botocore.exceptions import ClientError
 

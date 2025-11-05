@@ -15,11 +15,11 @@ from chalicelib.logger_config import setup_logger
 from chalicelib.post_tracker import PostTracker
 from chalicelib.config import config
 from chalicelib.s3_handler import S3Handler
-from chalicelib.util import (
-    measure_performance,
+from chalicelib.s3_key_utils import (
     create_daily_s3_key,
     create_complete_s3_key,
 )
+from chalicelib.performance_timer import measure_performance
 from collections import defaultdict
 
 logger = setup_logger(__name__)

@@ -4,7 +4,7 @@ from chalicelib.lambda_constants import (
 )
 from chalicelib.logger_config import setup_logger
 from chalicelib.reddit_scraper import scrap_daily_subreddits
-from chalicelib.util import create_response
+from chalicelib.http_responses import create_response
 from datetime import datetime
 
 logger = setup_logger(__name__)

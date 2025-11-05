@@ -8,7 +8,7 @@ from qdrant_client import QdrantClient
 from qdrant_client.http import models
 import uuid
 from rank_bm25 import BM25Okapi
-from chalicelib.performance import measure_execution_time
+from chalicelib.performance_timer import measure_execution_time
 from pydantic import SecretStr
 
 logger = setup_logger(__name__)
@@ -174,7 +174,7 @@ class QdrantIndexer:
 
         try:
             # Get results from both dense and sparse searches
-            # Reranking will be done once on combined results in chat.py
+            # Reranking will be done once on combined results in chat_session_manager.py
 
             # Dense search
             dense_response = self.client.query_points(
@@ -221,7 +221,7 @@ class QdrantIndexer:
             )
 
             # Sort by score and return top results
-            # Reranking will happen once in chat.py after combining both query results
+            # Reranking will happen once in chat_session_manager.py after combining both query results
             all_results.sort(key=lambda x: x["score"], reverse=True)
             top_results = all_results[:limit]
 

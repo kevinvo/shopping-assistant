@@ -232,7 +232,7 @@ bash scripts/build-layer.sh
 bash scripts/publish-layer.sh
 
 # Attach to all Chalice functions
-bash scripts/attach-layer-to-functions.sh
+bash scripts/attach_layer_to_functions.sh
 ```
 
 See `chalice_app/PHASE1_SETUP.md` for detailed layer deployment instructions.
@@ -346,7 +346,7 @@ shopping-assistant-agent/
 │   │   │   ├── scheduled.py      # Scheduled tasks
 │   │   │   └── sqs.py            # SQS consumers
 │   │   ├── websocket.py          # WebSocket handlers
-│   │   ├── chat.py               # Chat processing logic
+│   │   ├── chat_session_manager.py  # Chat processing logic
 │   │   ├── chat_message_service.py  # Message processor
 │   │   ├── llm.py                # LLM integration
 │   │   ├── indexers/             # Vector indexing
@@ -505,7 +505,7 @@ View traces at [LangSmith Dashboard](https://smith.langchain.com/).
 ### Common Issues
 
 1. **Import Errors in Lambda**
-   - Ensure layer is built and attached: `bash scripts/attach-layer-to-functions.sh`
+   - Ensure layer is built and attached: `bash scripts/attach_layer_to_functions.sh`
    - Check layer ARN in `.chalice/layer-arn.txt`
 
 2. **WebSocket Connection Failures**

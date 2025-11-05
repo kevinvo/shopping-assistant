@@ -8,7 +8,7 @@ from weaviate.auth import AuthApiKey
 from weaviate.client import Client
 import uuid
 from rank_bm25 import BM25Okapi
-from chalicelib.performance import measure_execution_time
+from chalicelib.performance_timer import measure_execution_time
 from pydantic import SecretStr
 
 logger = setup_logger(__name__)

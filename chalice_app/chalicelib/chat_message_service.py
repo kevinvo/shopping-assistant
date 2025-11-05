@@ -7,15 +7,15 @@ import logging
 from botocore.exceptions import ClientError
 from typing import Dict, Any, Union, Optional
 
-from chalicelib.chat import Chat
+from chalicelib.chat_session_manager import Chat
 from chalicelib.data_objects import (
     MessagePayload,
     ResponsePayload,
     EvaluationMessage,
 )
 from chalicelib.dynamo_tables import ConnectionInfo
-from chalicelib.performance import measure_execution_time
-from chalicelib.logging_utils import LogExtra
+from chalicelib.performance_timer import measure_execution_time
+from chalicelib.structured_logging import LogExtra
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)

@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta
-from chalicelib.util import create_daily_s3_key, create_parquet_post_s3_key
+from chalicelib.s3_key_utils import create_daily_s3_key, create_parquet_post_s3_key
 from chalicelib.logger_config import setup_logger
 from chalicelib.s3_handler import S3Handler
 from chalicelib.lambda_constants import SubredditData, SUBREDDIT_NAMES, RedditPost

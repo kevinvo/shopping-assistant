@@ -39,3 +39,21 @@ def measure_execution_time(func: Callable) -> Callable:
         return result
 
     return wrapper
+
+
+def measure_performance(func: Callable) -> Callable:
+    """Simplified performance decorator retained for backwards compatibility."""
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs) -> Any:
+        start_time = time.time()
+        result = func(*args, **kwargs)
+        end_time = time.time()
+        logger.info(
+            "PERFORMANCE: %s executed in %.4f seconds",
+            func.__qualname__,
+            end_time - start_time,
+        )
+        return result
+
+    return wrapper

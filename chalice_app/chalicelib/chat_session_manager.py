@@ -4,7 +4,7 @@ import os
 from typing import Dict, List, Tuple, Optional, Any
 from langsmith import traceable, get_current_run_tree
 from chalicelib.indexers.indexer_factory import IndexerFactory
-from chalicelib.performance import measure_execution_time
+from chalicelib.performance_timer import measure_execution_time
 from chalicelib.data_objects import ChatMessage, SearchResult, RetrievalMetricsDocument
 from chalicelib.llm import LLMFactory, LLMProvider
 from chalicelib.llm_reranker import LLMReranker
