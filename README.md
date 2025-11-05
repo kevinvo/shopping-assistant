@@ -81,7 +81,7 @@ The application is built on AWS using a serverless architecture with the followi
    - LLM integration and reranking
    - Session and connection management
 
-4. **Glue Scripts** (`glue_scripts/`): Batch data processing
+4. **Glue Jobs** (`glue_jobs/`): Batch data processing
    - Reddit data transformation
    - Top posts processing
    - Daily aggregation jobs
@@ -359,7 +359,7 @@ shopping-assistant-agent/
 ├── cdk_infrastructure/            # AWS CDK infrastructure
 │   ├── __init__.py
 │   └── infrastructure_stack.py   # Main stack definition
-├── glue_scripts/                  # AWS Glue batch jobs
+├── glue_jobs/                     # AWS Glue batch jobs
 │   ├── process_top_data.py
 │   └── process_top_daily_data.py
 ├── tests/                         # Unit tests
@@ -463,13 +463,13 @@ Maintain code quality with:
 
 ```bash
 # Format code
-black chalice_app/ cdk_infrastructure/ glue_scripts/
+black chalice_app/ cdk_infrastructure/ glue_jobs/
 
 # Lint and auto-fix
-ruff check --fix chalice_app/ cdk_infrastructure/ glue_scripts/
+ruff check --fix chalice_app/ cdk_infrastructure/ glue_jobs/
 
 # Security scan
-bandit -r chalice_app/ cdk_infrastructure/ glue_scripts/
+bandit -r chalice_app/ cdk_infrastructure/ glue_jobs/
 
 # Type checking
 mypy chalice_app/ cdk_infrastructure/

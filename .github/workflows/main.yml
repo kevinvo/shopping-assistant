@@ -44,20 +44,20 @@ jobs:
 
     - name: Code Formatting (Black)
       run: |
-        black --check chalice_app/ cdk_infrastructure/ glue_scripts/
+        black --check chalice_app/ cdk_infrastructure/ glue_jobs/
 
     - name: Linting (Ruff)
       run: |
-        ruff check chalice_app/ cdk_infrastructure/ glue_scripts/
+        ruff check chalice_app/ cdk_infrastructure/ glue_jobs/
 
     - name: Security Check (Bandit)
       run: |
-        bandit -r chalice_app/ cdk_infrastructure/ glue_scripts/ -ll
+        bandit -r chalice_app/ cdk_infrastructure/ glue_jobs/ -ll
 
     - name: Type Checking (MyPy)
       continue-on-error: true
       run: |
-        mypy chalice_app/ cdk_infrastructure/ glue_scripts/ || echo "MyPy found type issues (non-blocking)"
+        mypy chalice_app/ cdk_infrastructure/ glue_jobs/ || echo "MyPy found type issues (non-blocking)"
 
     - name: Run Tests
       run: |

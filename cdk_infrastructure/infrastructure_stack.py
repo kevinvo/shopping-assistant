@@ -149,7 +149,7 @@ class ShoppingAssistantInfrastructureStack(Stack):
         )
 
         # Deploy Glue scripts to S3
-        self.deploy_glue_scripts()
+        self.deploy_glue_jobs()
 
         # Create Athena results bucket before Lambda functions
         self.athena_results_bucket = self.create_athena_results_bucket()
@@ -749,11 +749,11 @@ class ShoppingAssistantInfrastructureStack(Stack):
 
         return stages
 
-    def deploy_glue_scripts(self):
+    def deploy_glue_jobs(self):
         s3_deployment.BucketDeployment(
             self,
-            id="DeployGlueScripts",
-            sources=[s3_deployment.Source.asset("glue_scripts")],
+            id="DeployGlueJobs",
+            sources=[s3_deployment.Source.asset("glue_jobs")],
             destination_bucket=self.glue_scripts_bucket,
             destination_key_prefix="",  # Optional: specify a prefix if needed
         )
