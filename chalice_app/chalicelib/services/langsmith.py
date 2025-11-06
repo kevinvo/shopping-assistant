@@ -2,19 +2,22 @@
 
 import logging
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
+
 from langsmith import Client
 
 from chalicelib.core.config import config
 
+
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-# Initialize LangSmith client
+
 langsmith_client = Client(
     api_key=config.langsmith_api_key,
     api_url=config.langsmith_api_url,
 )
+
 
 DATASET_NAME = "customer-queries"
 
@@ -29,19 +32,19 @@ class QueryLogger:
 
     def _ensure_dataset_exists(self) -> None:
         try:
-            # Try to get the dataset
             self.client.read_dataset(dataset_name=self.dataset_name)
-            logger.info(f"Dataset '{self.dataset_name}' already exists")
+            logger.info("Dataset '%s' already exists", self.dataset_name)
         except Exception:
-            # Dataset doesn't exist, create it
             try:
                 self.client.create_dataset(
                     dataset_name=self.dataset_name,
-                    description="Customer queries with session tracking for the shopping assistant",
+                    description=(
+                        "Customer queries with session tracking for the shopping assistant"
+                    ),
                 )
-                logger.info(f"Created dataset '{self.dataset_name}'")
-            except Exception as e:
-                logger.warning(f"Could not create dataset: {e}")
+                logger.info("Created dataset '%s'", self.dataset_name)
+            except Exception as exc:  # pragma: no cover - logging-only path
+                logger.warning("Could not create dataset: %s", exc)
 
     def log_query(
         self,
@@ -51,8 +54,7 @@ class QueryLogger:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         try:
-            # Prepare metadata
-            log_metadata = {
+            log_metadata: Dict[str, Any] = {
                 "session_id": session_id,
                 "timestamp": datetime.utcnow().isoformat(),
                 "query_length": len(query),
@@ -61,7 +63,6 @@ class QueryLogger:
             if metadata:
                 log_metadata.update(metadata)
 
-            # Create example in dataset
             self.client.create_example(
                 inputs={"query": query},
                 outputs={"response": response} if response else None,
@@ -69,14 +70,12 @@ class QueryLogger:
                 metadata=log_metadata,
             )
 
-            logger.info(f"Logged query to dataset for session {session_id}")
+            logger.info("Logged query to dataset for session %s", session_id)
 
-        except Exception as e:
-            # Don't fail the request if logging fails
-            logger.warning(f"Failed to log query to dataset: {e}")
+        except Exception as exc:  # pragma: no cover - logging-only path
+            logger.warning("Failed to log query to dataset: %s", exc)
 
 
-# Singleton instance
 query_logger = QueryLogger()
 
 

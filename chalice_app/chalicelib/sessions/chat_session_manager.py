@@ -12,7 +12,7 @@ from chalicelib.models.data_objects import (
 )
 from chalicelib.llm import LLMFactory, LLMProvider, LLMReranker
 from chalicelib.core.config import config
-from chalicelib.models.langsmith_dataset import log_customer_query
+from chalicelib.services.langsmith import log_customer_query
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
