@@ -1,7 +1,7 @@
 import json
 import boto3
 from botocore.exceptions import ClientError
-from chalicelib.models.lambda_constants import SubredditData
+from chalicelib.models.data_objects import SubredditData
 from chalicelib.core.logger_config import setup_logger
 from chalicelib.core.config import config
 from typing import List

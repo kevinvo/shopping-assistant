@@ -4,13 +4,8 @@ import praw
 from datetime import datetime, timezone
 import praw.models
 import prawcore
-from chalicelib.models.lambda_constants import (
-    SUBREDDIT_NAMES,
-    TimestampData,
-    RedditComment,
-    RedditPost,
-    TimeFilter,
-)
+from chalicelib.models.lambda_constants import SUBREDDIT_NAMES, TimeFilter
+from chalicelib.models.data_objects import TimestampData, RedditComment, RedditPost
 from chalicelib.core.logger_config import setup_logger
 from chalicelib.ingestion.reddit.post_tracker import PostTracker
 from chalicelib.core.config import config

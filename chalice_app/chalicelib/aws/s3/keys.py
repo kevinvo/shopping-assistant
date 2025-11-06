@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from chalicelib.models.lambda_constants import RedditPost
+from chalicelib.models.data_objects import RedditPost
 
 
 def create_daily_s3_key(subreddit_name: str, today: datetime | None = None) -> str:

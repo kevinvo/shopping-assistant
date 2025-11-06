@@ -1,5 +1,5 @@
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from chalicelib.models.lambda_constants import RedditPost
+from chalicelib.models.data_objects import RedditPost
 from typing import List, Optional
 from langchain.schema import Document
 from dataclasses import dataclass, asdict

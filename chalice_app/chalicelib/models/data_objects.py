@@ -1,5 +1,5 @@
 from dataclasses import dataclass, asdict, field
-from typing import Dict, Any, Union
+from typing import Dict, Any, Union, List, Optional
 from enum import Enum
 import json
 from datetime import datetime
@@ -142,6 +142,122 @@ class RerankerJudgment:
 
 
 @dataclass
+class RedditComment:
+    id: str
+    score: int
+    body: str
+    year: int
+    month: int
+
+    def to_json(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class RedditPost:
+    id: str
+    title: str
+    original_title: str
+    score: int
+    url: str
+    content: str
+    comments: List[RedditComment]
+    year: int
+    month: int
+    subreddit_name: str
+    created_at_year: Optional[int] = None
+    created_at_month: Optional[int] = None
+    created_at_day: Optional[int] = None
+
+    def __post_init__(self):
+        if isinstance(self.comments, list):
+            self.comments = [
+                RedditComment(**comment) if isinstance(comment, dict) else comment
+                for comment in self.comments
+            ]
+        else:
+            self.comments = []
+
+        now = datetime.now()
+        self.created_at_year = int(now.year)
+        self.created_at_month = int(now.month)
+        self.created_at_day = int(now.day)
+        self.subreddit_name = self.subreddit_name.lower()
+        self.year = int(self.year)
+        self.month = int(self.month)
+        self.score = int(self.score)
+
+    def to_json(self) -> Dict[str, Any]:
+        data = asdict(self)
+        data["comments"] = [comment.to_json() for comment in self.comments]
+        return data
+
+
+@dataclass
+class SubredditData:
+    subreddit: str
+    post_count: int
+    posts: List[RedditPost]
+
+    def __post_init__(self):
+        if isinstance(self.posts, list):
+            self.posts = [
+                (
+                    post
+                    if isinstance(post, RedditPost)
+                    else RedditPost(**post, subreddit_name=self.subreddit)
+                )
+                for post in self.posts
+            ]
+
+    def to_json(self) -> Dict[str, Any]:
+        data = asdict(self)
+        data["posts"] = [post.to_json() for post in self.posts]
+        return data
+
+
+@dataclass
+class TimestampData:
+    year: int
+    month: int
+
+
+@dataclass(frozen=True)
+class EvaluationMessage:
+    """Represents the payload sent to the evaluation SQS queue."""
+
+    query: str
+    response: str
+    session_id: str
+    request_id: str
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    timestamp: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize the evaluation message to a dictionary."""
+        return {
+            "query": self.query,
+            "response": self.response,
+            "session_id": self.session_id,
+            "request_id": self.request_id,
+            "metadata": self.metadata,
+            "timestamp": self.timestamp,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "EvaluationMessage":
+        """Deserialize an evaluation message from a dictionary."""
+        return cls(
+            query=data.get("query", ""),
+            response=data.get("response", ""),
+            session_id=data.get("session_id", ""),
+            request_id=data.get("request_id", ""),
+            metadata=data.get("metadata", {}) or {},
+            timestamp=data.get("timestamp") or datetime.utcnow().isoformat(),
+        )
+
+
+@dataclass
 class MessagePayload:
     """Data class for WebSocket message payloads sent to SQS."""
 
@@ -255,39 +371,4 @@ class ResponsePayload:
             content=content,
             request_id=request_id,
             timestamp=datetime.now().isoformat(),
-        )
-
-
-@dataclass(frozen=True)
-class EvaluationMessage:
-    """Represents the payload sent to the evaluation SQS queue."""
-
-    query: str
-    response: str
-    session_id: str
-    request_id: str
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    timestamp: str = field(default_factory=lambda: datetime.utcnow().isoformat())
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Serialize the evaluation message to a dictionary."""
-        return {
-            "query": self.query,
-            "response": self.response,
-            "session_id": self.session_id,
-            "request_id": self.request_id,
-            "metadata": self.metadata,
-            "timestamp": self.timestamp,
-        }
-
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "EvaluationMessage":
-        """Deserialize an evaluation message from a dictionary."""
-        return cls(
-            query=data.get("query", ""),
-            response=data.get("response", ""),
-            session_id=data.get("session_id", ""),
-            request_id=data.get("request_id", ""),
-            metadata=data.get("metadata", {}) or {},
-            timestamp=data.get("timestamp") or datetime.utcnow().isoformat(),
         )

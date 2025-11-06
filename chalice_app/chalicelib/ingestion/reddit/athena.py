@@ -6,7 +6,7 @@ from typing import List, Generator, Tuple, Optional
 from pyathena import connect
 
 from chalicelib.core.logger_config import setup_logger
-from chalicelib.models.lambda_constants import RedditPost
+from chalicelib.models.data_objects import RedditPost
 
 logger = setup_logger(__name__)
 
