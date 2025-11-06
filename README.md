@@ -76,9 +76,10 @@ The application is built on AWS using a serverless architecture with the followi
    - VPC and networking
 
 3. **Business Logic** (`chalice_app/chalicelib/`):
+   - Modular packages for APIs, jobs, ingestion, LLM utilities, sessions, and shared models
    - Chat processing with RAG
    - Vector indexing and retrieval
-   - LLM integration and reranking
+   - LLM integration, reranking, and LangSmith logging
    - Session and connection management
 
 4. **Glue Jobs** (`glue_jobs/`): Batch data processing
@@ -340,19 +341,17 @@ shopping-assistant-agent/
 ├── chalice_app/                   # Main Chalice application
 │   ├── app.py                     # Chalice entry point
 │   ├── requirements.txt           # Python dependencies
-│   ├── chalicelib/                # Business logic
-│   │   ├── handlers/              # Route handlers
-│   │   │   ├── rest.py           # REST API endpoints
-│   │   │   ├── scheduled.py      # Scheduled tasks
-│   │   │   └── sqs.py            # SQS consumers
-│   │   ├── websocket.py          # WebSocket handlers
-│   │   ├── chat_session_manager.py  # Chat processing logic
-│   │   ├── chat_message_service.py  # Message processor
-│   │   ├── llm.py                # LLM integration
-│   │   ├── indexers/             # Vector indexing
-│   │   ├── reranker/             # LLM reranking
-│   │   ├── config.py             # Configuration
-│   │   └── ...                   # Other modules
+│   ├── chalicelib/                # Business logic packages
+│   │   ├── api/                  # REST and WebSocket route registration
+│   │   ├── aws/                  # AWS service helpers (S3, Dynamo)
+│   │   ├── core/                 # Configuration, logging, utilities
+│   │   ├── ingestion/            # Reddit scraping and preprocessing
+│   │   ├── indexers/             # Vector indexing utilities
+│   │   ├── jobs/                 # Scheduled/background jobs
+│   │   ├── llm/                  # LLM client, metrics, reranker
+│   │   ├── models/               # Shared data objects and constants
+│   │   ├── services/             # External service integrations (e.g., LangSmith)
+│   │   └── sessions/             # Chat session orchestration
 │   ├── scripts/                   # Deployment scripts
 │   ├── tests/                     # Application tests
 │   └── .chalice/                  # Chalice configuration
