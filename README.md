@@ -13,7 +13,8 @@ The application is built on AWS using a serverless architecture with the followi
 - **Backend Framework**: [AWS Chalice](https://github.com/aws/chalice) (Python serverless framework)
 - **Infrastructure**: AWS CDK (TypeScript/CloudFormation)
 - **Vector Databases**: Qdrant and Weaviate
-- **LLM Providers**: OpenAI and Anthropic
+- **LLM Providers**: DeepSeek (chat generation) and Anthropic
+- **Embeddings**: OpenAI
 - **AI Orchestration**: LangChain
 - **Real-time Communication**: WebSocket API via API Gateway
 - **Data Processing**: AWS Glue, Athena
@@ -56,7 +57,8 @@ The application is built on AWS using a serverless architecture with the followi
 │  • Data Lake: S3 (raw/processed Reddit data)                    │
 │  • Metadata: DynamoDB (sessions, posts tracking)                │
 │  • Query Engine: Athena (data lake queries)                     │
-│  • LLMs: OpenAI (GPT-4), Anthropic (Claude)                     │
+│  • LLMs: DeepSeek (chat), Anthropic (Claude)                    │
+│  • Embeddings: OpenAI                                           │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
