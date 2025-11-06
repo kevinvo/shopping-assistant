@@ -56,7 +56,7 @@
         }
       }
     },
-    "prod": {
+    "chalice-prod": {
       "api_gateway_stage": "prod",
       "environment_variables": {
         "SESSIONS_TABLE_V2_NAME": "SessionsTableV2",
