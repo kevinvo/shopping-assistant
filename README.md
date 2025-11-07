@@ -17,9 +17,9 @@ The application is built on AWS using a serverless architecture with the followi
 - **Embeddings**: OpenAI
 - **AI Orchestration**: LangChain
 - **Real-time Communication**: WebSocket API via API Gateway
-- **Data Processing**: AWS Glue, Athena
+- **Data Lake**: Amazon S3 (raw and curated zones), AWS Glue ETL jobs, Amazon Athena interactive queries
 - **Queue Management**: SQS
-- **Storage**: S3, DynamoDB
+- **Operational Storage**: DynamoDB
 
 ### System Architecture
 
