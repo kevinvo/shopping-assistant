@@ -18,6 +18,7 @@ The application is built on AWS using a serverless architecture with the followi
 - **Prompt Enrichment**: HyPE (Hypothetical Prompt Embeddings)
 - **Embeddings**: OpenAI
 - **AI Orchestration**: LangChain
+- **Retrieval**: Hybrid RAG (vector + keyword search)
 - **Real-time Communication**: WebSocket API via API Gateway
 - **Data Lake**: Amazon S3 (raw and curated zones), AWS Glue ETL jobs, Amazon Athena interactive queries
 - **Queue Management**: SQS
