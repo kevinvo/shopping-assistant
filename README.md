@@ -14,6 +14,8 @@ The application is built on AWS using a serverless architecture with the followi
 - **Infrastructure**: AWS CDK (TypeScript/CloudFormation)
 - **Vector Databases**: Qdrant and Weaviate
 - **LLM Providers**: DeepSeek (chat generation) and Anthropic
+- **Query Rewriting**: Context-aware reformulation before retrieval
+- **Prompt Enrichment**: HyPE (Hypothetical Prompt Embeddings)
 - **Embeddings**: OpenAI
 - **AI Orchestration**: LangChain
 - **Real-time Communication**: WebSocket API via API Gateway
@@ -44,6 +46,8 @@ The application is built on AWS using a serverless architecture with the followi
 │                      Processing Layer                            │
 ├─────────────────────────────────────────────────────────────────┤
 │  • Chat Processor (query understanding, retrieval, reranking)    │
+│  • Query Rewriting (context-aware reformulation)                 │
+│  • HyPE Prompt Embeddings (hypothetical context expansion)       │
 │  • Data Indexer (vector embeddings to Qdrant/Weaviate)          │
 │  • Reddit Scraper (daily Reddit data collection)                │
 │  • Glue Jobs (batch data processing)                             │
@@ -57,6 +61,7 @@ The application is built on AWS using a serverless architecture with the followi
 │  • Data Lake: S3 (raw/processed Reddit data)                    │
 │  • Metadata: DynamoDB (sessions, posts tracking)                │
 │  • Query Engine: Athena (data lake queries)                     │
+│  • Observability: LangSmith (query logs, retrieval metrics)     │
 │  • LLMs: DeepSeek (chat), Anthropic (Claude)                    │
 │  • Embeddings: OpenAI                                           │
 └─────────────────────────────────────────────────────────────────┘
