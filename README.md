@@ -48,6 +48,7 @@ The application is built on AWS using a serverless architecture with the followi
 ├─────────────────────────────────────────────────────────────────┤
 │  • Chat Processor (query understanding, retrieval, reranking)    │
 │  • Query Rewriting (context-aware reformulation)                 │
+│  • Hybrid RAG Retrieval (dense vectors + keyword signals)        │
 │  • HyPE Prompt Embeddings (hypothetical context expansion)       │
 │  • Data Indexer (vector embeddings to Qdrant/Weaviate)          │
 │  • Reddit Scraper (daily Reddit data collection)                │
