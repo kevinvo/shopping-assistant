@@ -20,6 +20,14 @@ from chalicelib.api.websocket import (
     handle_websocket_message,
 )
 from chalicelib.core.error_notifications import notify_on_exception
+from chalicelib.core.cold_start import (
+    mark_init_start,
+    mark_init_end,
+    measure_cold_start,
+)
+
+# Mark initialization start (this happens at module import time)
+mark_init_start()
 
 # Configure logging
 logger = logging.getLogger()
@@ -36,8 +44,12 @@ SCRAPER_STATE_MACHINE_ARN = os.environ.get("SCRAPER_STATE_MACHINE_ARN")
 
 register_rest_routes(app)
 
+# Mark initialization end after app and routes are registered
+mark_init_end()
+
 
 @app.lambda_function(name="scraper_worker")
+@measure_cold_start(handler_name="scraper_worker")
 @notify_on_exception
 def scraper_worker(event, context):
     """Execute the daily Reddit scraper. Intended for Step Functions invocation."""
