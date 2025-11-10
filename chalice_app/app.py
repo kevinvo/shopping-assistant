@@ -67,6 +67,7 @@ def scraper_worker(event, context):
 
 # WebSocket handlers must be defined at module level in app.py for Chalice to find them
 @app.on_ws_connect()
+@measure_cold_start(handler_name="websocket_connect")
 @notify_on_exception
 def websocket_connect(event):
     """Handle WebSocket connection"""

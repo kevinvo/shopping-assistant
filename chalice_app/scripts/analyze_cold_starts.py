@@ -13,8 +13,17 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--function-name",
-        required=True,
         help="Lambda function name (e.g., shopping-assistant-api-chalice-test-scraper_worker)",
+    )
+    parser.add_argument(
+        "--handler",
+        choices=[
+            "scraper_worker",
+            "websocket_connect",
+            "websocket_disconnect",
+            "websocket_message",
+        ],
+        help="Handler name (will construct function name automatically)",
     )
     parser.add_argument(
         "--stage",
@@ -49,10 +58,6 @@ def build_query(hours: int) -> str:
     return """
 fields @timestamp, @message, @logStream
 | filter @message like /COLD_START_METRICS|🚀|⚡/
-| parse @message /.*COLD_START_METRICS.*cold_start_metrics":\\s*"([^"]+)".*/ as metrics_json
-| parse @message /.*🚀 Cold start detected for ([^|]+).*/ as handler_name_cold
-| parse @message /.*⚡ Warm start for ([^|]+).*/ as handler_name_warm
-| parse @message /.*Init: ([0-9.]+)ms.*/ as init_duration_ms
 | sort @timestamp desc
 | limit 1000
 """
@@ -141,7 +146,17 @@ def analyze_results(results: List[Dict]) -> Dict:
             if field["field"] == "@message":
                 message = field["value"]
             elif field["field"] == "@timestamp":
-                timestamp = int(field["value"]) / 1000
+                ts_value = field["value"]
+                try:
+                    timestamp = int(ts_value) / 1000
+                except (ValueError, TypeError):
+                    try:
+                        from datetime import datetime
+
+                        dt = datetime.fromisoformat(ts_value.replace("Z", "+00:00"))
+                        timestamp = dt.timestamp()
+                    except (ValueError, AttributeError):
+                        timestamp = None
 
         metrics = parse_metrics_from_message(message)
         if not metrics:
@@ -234,11 +249,23 @@ def print_summary(analysis: Dict):
 
 def main():
     args = parse_args()
-    log_group = get_log_group_name(args.function_name)
+
+    if args.handler:
+        function_name = f"shopping-assistant-api-{args.stage}-{args.handler}"
+    elif args.function_name:
+        function_name = args.function_name
+    else:
+        print(
+            "Error: Either --function-name or --handler must be provided",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    log_group = get_log_group_name(function_name)
     end_time = datetime.utcnow()
     start_time = end_time - timedelta(hours=args.hours)
 
-    print(f"Analyzing cold starts for: {args.function_name}")
+    print(f"Analyzing cold starts for: {function_name}")
     print(f"Log group: {log_group}")
     print(f"Time range: {start_time} to {end_time}")
     print("Querying CloudWatch Logs...")
