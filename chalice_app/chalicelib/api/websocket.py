@@ -11,7 +11,6 @@ import boto3
 from botocore.exceptions import ClientError
 from chalice import WebsocketDisconnectedError
 
-from chalicelib.aws.dynamo.tables import ConnectionInfo
 from chalicelib.core.structured_logging import LogExtra
 from chalicelib.models.data_objects import MessagePayload, ResponsePayload
 
@@ -25,6 +24,7 @@ sqs_client = boto3.client("sqs")
 
 def handle_websocket_connect(connection_id: str) -> None:
     """Handle WebSocket connection logic."""
+    from chalicelib.aws.dynamo.tables import ConnectionInfo
 
     logger.info("WebSocket connect event for connection: %s", connection_id)
 
@@ -46,6 +46,7 @@ def handle_websocket_connect(connection_id: str) -> None:
 
 def handle_websocket_disconnect(connection_id: str) -> None:
     """Handle WebSocket disconnection logic."""
+    from chalicelib.aws.dynamo.tables import ConnectionInfo
 
     logger.info("WebSocket disconnect event for connection: %s", connection_id)
     ConnectionInfo.delete_by_id(id=connection_id)

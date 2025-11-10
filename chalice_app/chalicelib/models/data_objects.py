@@ -1,9 +1,11 @@
 from dataclasses import dataclass, asdict, field
-from typing import Dict, Any, Union, List, Optional
+from typing import Dict, Any, Union, List, Optional, TYPE_CHECKING
 from enum import Enum
 import json
 from datetime import datetime
-from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+
+if TYPE_CHECKING:
+    from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 
 
 class MessageType(str, Enum):
@@ -36,8 +38,10 @@ class ChatMessage:
         """Create a ChatMessage from a dictionary."""
         return cls(role=data.get("role", ""), content=data.get("content", ""))
 
-    def to_langchain_message(self) -> Union[HumanMessage, SystemMessage, AIMessage]:
+    def to_langchain_message(self) -> "Union[HumanMessage, SystemMessage, AIMessage]":
         """Convert ChatMessage to appropriate LangChain message type."""
+        from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+
         if self.role == "system":
             return SystemMessage(content=self.content)
         elif self.role == "assistant":
