@@ -97,7 +97,7 @@ class AppConfig:
             client = session.client(service_name="secretsmanager")
             secret_value = client.get_secret_value(SecretId=secret_name)
             credentials = json.loads(secret_value["SecretString"])
-            return credentials.get("REDDIT", {})
+            return credentials
         except Exception as e:
             logger.error(f"Error loading credentials from Secrets Manager: {e}")
             return {}
@@ -127,6 +127,13 @@ class AppConfig:
         api_key = self._credentials.get("ANTHROPIC_API_KEY")
         if not api_key:
             raise ValueError("Anthropic API key not found in credentials")
+        return api_key
+
+    @property
+    def openrouter_api_key(self) -> str:
+        api_key = self._credentials.get("OPENROUTER_API_KEY")
+        if not api_key:
+            raise ValueError("OpenRouter API key not found in credentials")
         return api_key
 
     @property
@@ -170,6 +177,7 @@ class AppConfig:
     def to_s(self) -> str:
         aws_creds_str = self.aws_credentials.to_s()
         reddit_creds_str = self.reddit_credentials.to_s()
+        openrouter_key_length = len(self._credentials.get("OPENROUTER_API_KEY", ""))
         log_message = (
             f"AppConfig - Environment: {self.env.value}, \n"
             f"AWS Credentials: {aws_creds_str}, \n"
@@ -177,6 +185,7 @@ class AppConfig:
             f"OpenAI API Key Length: {len(self.openai_api_key)} \n"
             f"DeepSeek API Key Length: {len(self.deepseek_api_key)} \n"
             f"Anthropic API Key Length: {len(self.anthropic_api_key) if hasattr(self, 'anthropic_api_key') else 0} \n"
+            f"OpenRouter API Key Length: {openrouter_key_length} \n"
         )
         return log_message
 
