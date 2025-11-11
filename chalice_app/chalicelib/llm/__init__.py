@@ -1,7 +1,6 @@
 """Public interface for LLM-related utilities."""
 
 from .client import (  # noqa: F401
-    AnthropicClient,
     BaseLLM,
     DeepSeekClient,
     LLMFactory,
@@ -11,7 +10,6 @@ from .metrics import RetrievalMetrics, RetrievalMetricsResult  # noqa: F401
 from .reranker import LLMReranker  # noqa: F401
 
 __all__ = [
-    "AnthropicClient",
     "BaseLLM",
     "DeepSeekClient",
     "LLMFactory",

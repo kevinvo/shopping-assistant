@@ -3,14 +3,11 @@ from typing import List
 from abc import ABC, abstractmethod
 from enum import Enum
 from openai import OpenAI
-import anthropic
 from chalicelib.core.config import AppConfig
 from chalicelib.core.performance_timer import measure_execution_time
 from chalicelib.models.data_objects import ChatMessage
 from langsmith import traceable
 from langchain_openai import ChatOpenAI
-from langchain_anthropic import ChatAnthropic
-from langchain_core.messages import HumanMessage
 from pydantic import SecretStr
 from dataclasses import dataclass
 from typing import Dict, Any
@@ -26,7 +23,6 @@ def _ensure_models_rebuilt():
         # Try to rebuild models - this is still needed in current LangChain versions
         # due to complex forward reference issues in the LangChain codebase
         ChatOpenAI.model_rebuild()
-        ChatAnthropic.model_rebuild()
     except Exception as e:
         logger.warning(f"Model rebuild warning: {e}")
         # Continue anyway - models might already be built
@@ -164,7 +160,6 @@ class LLMProvider(Enum):
     """Enum for supported LLM providers"""
 
     DEEPSEEK = "deepseek"
-    ANTHROPIC = "anthropic"
 
 
 class BaseLLM(ABC):
@@ -263,7 +258,7 @@ class DeepSeekClient(BaseLLM):
                 base_url="https://openrouter.ai/api/v1",
                 temperature=kwargs.get("temperature", 0.7),
                 top_p=kwargs.get("top_p", 0.95),
-                max_tokens=kwargs.get("max_tokens", 2000),
+                max_tokens=kwargs.get("max_tokens", 2000),  # type: ignore[arg-type]
                 model_kwargs=model_kwargs,
                 default_headers={
                     "HTTP-Referer": "https://github.com/your-org/shopping-assistant-agent",
@@ -279,55 +274,10 @@ class DeepSeekClient(BaseLLM):
             raise
 
 
-class AnthropicClient(BaseLLM):
-    def __init__(self):
-        self.config = AppConfig()
-        self.client = anthropic.Anthropic(api_key=self.config.anthropic_api_key)
-        self.model = "claude-3-7-sonnet-20250219"
-
-    @measure_execution_time
-    @traceable(name="anthropic_chat")
-    def chat(self, messages: List[ChatMessage], **kwargs) -> str:
-        try:
-            # Convert ChatMessage objects to LangChain messages for LangSmith tracking
-            langchain_messages = [m.to_langchain_message() for m in messages]
-
-            # Ensure model is rebuilt before creating client
-            _ensure_models_rebuilt()
-
-            # For JSON mode with Anthropic, add a system message reminder
-            # (Anthropic doesn't have response_format like OpenAI)
-            if kwargs.get("json_mode", False):
-                # Add a strong reminder at the end for JSON-only output
-                json_reminder = HumanMessage(
-                    content="Remember: Respond with ONLY valid JSON, no markdown formatting, no explanations."
-                )
-                langchain_messages.append(json_reminder)
-
-            # Use LangChain ChatAnthropic for proper LangSmith integration
-            langchain_client = ChatAnthropic(
-                model_name=self.model,
-                api_key=SecretStr(self.config.anthropic_api_key),
-                temperature=kwargs.get("temperature", 0.7),
-                max_tokens_to_sample=kwargs.get("max_tokens", 1000),
-                timeout=60,
-                stop=None,
-            )
-
-            # Use LangChain client which will automatically track with LangSmith
-            response = langchain_client.invoke(langchain_messages)
-            return str(response.content) if response.content else ""
-        except Exception as e:
-            logger.error(f"Error in Anthropic chat: {e}")
-            raise
-
-
 class LLMFactory:
     @staticmethod
-    def create_llm(provider: LLMProvider = LLMProvider.ANTHROPIC) -> BaseLLM:
+    def create_llm(provider: LLMProvider = LLMProvider.DEEPSEEK) -> BaseLLM:
         if provider == LLMProvider.DEEPSEEK:
             return DeepSeekClient()
-        elif provider == LLMProvider.ANTHROPIC:
-            return AnthropicClient()
         else:
             raise ValueError(f"Unknown LLM provider: {provider}")
