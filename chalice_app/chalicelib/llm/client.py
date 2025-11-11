@@ -232,10 +232,14 @@ class DeepSeekClient(BaseLLM):
     def __init__(self):
         self.config = AppConfig()
         self.client = OpenAI(
-            api_key=self.config.deepseek_api_key,
-            base_url="https://api.deepseek.com/v1",
+            api_key=self.config.openrouter_api_key,
+            base_url="https://openrouter.ai/api/v1",
+            default_headers={
+                "HTTP-Referer": "https://github.com/your-org/shopping-assistant-agent",
+                "X-Title": "Shopping Assistant Agent",
+            },
         )
-        self.model = "deepseek-chat"
+        self.model = "deepseek/deepseek-chat"
 
     @measure_execution_time
     @traceable(name="deepseek_chat")
@@ -255,11 +259,16 @@ class DeepSeekClient(BaseLLM):
             # Use LangChain ChatOpenAI for proper LangSmith integration
             langchain_client = ChatOpenAI(
                 model=self.model,
-                api_key=SecretStr(self.config.deepseek_api_key),
-                base_url="https://api.deepseek.com/v1",
+                api_key=SecretStr(self.config.openrouter_api_key),
+                base_url="https://openrouter.ai/api/v1",
                 temperature=kwargs.get("temperature", 0.7),
                 top_p=kwargs.get("top_p", 0.95),
+                max_tokens=kwargs.get("max_tokens", 2000),
                 model_kwargs=model_kwargs,
+                default_headers={
+                    "HTTP-Referer": "https://github.com/your-org/shopping-assistant-agent",
+                    "X-Title": "Shopping Assistant Agent",
+                },
             )
 
             # Use LangChain client which will automatically track with LangSmith

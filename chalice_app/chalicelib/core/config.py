@@ -177,14 +177,17 @@ class AppConfig:
     def to_s(self) -> str:
         aws_creds_str = self.aws_credentials.to_s()
         reddit_creds_str = self.reddit_credentials.to_s()
+        openai_key_length = len(self._credentials.get("OPENAI_API_KEY", ""))
+        deepseek_key_length = len(self._credentials.get("DEEPSEEK_API_KEY", ""))
+        anthropic_key_length = len(self._credentials.get("ANTHROPIC_API_KEY", ""))
         openrouter_key_length = len(self._credentials.get("OPENROUTER_API_KEY", ""))
         log_message = (
             f"AppConfig - Environment: {self.env.value}, \n"
             f"AWS Credentials: {aws_creds_str}, \n"
             f"Reddit Credentials: {reddit_creds_str}, \n"
-            f"OpenAI API Key Length: {len(self.openai_api_key)} \n"
-            f"DeepSeek API Key Length: {len(self.deepseek_api_key)} \n"
-            f"Anthropic API Key Length: {len(self.anthropic_api_key) if hasattr(self, 'anthropic_api_key') else 0} \n"
+            f"OpenAI API Key Length: {openai_key_length} \n"
+            f"DeepSeek API Key Length: {deepseek_key_length} \n"
+            f"Anthropic API Key Length: {anthropic_key_length} \n"
             f"OpenRouter API Key Length: {openrouter_key_length} \n"
         )
         return log_message
