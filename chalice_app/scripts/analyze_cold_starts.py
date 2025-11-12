@@ -5,7 +5,7 @@ import re
 import sys
 import time
 from dataclasses import asdict, dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
 import boto3
@@ -435,7 +435,7 @@ def main():
         sys.exit(1)
 
     log_group = get_log_group_name(function_name)
-    end_time = datetime.utcnow()
+    end_time = datetime.now(timezone.utc)
     start_time = end_time - timedelta(hours=args.hours)
 
     print(f"Analyzing cold starts for: {function_name}")

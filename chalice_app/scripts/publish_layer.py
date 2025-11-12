@@ -7,7 +7,7 @@ import argparse
 import shutil
 import sys
 import tempfile
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 import zipfile
@@ -67,7 +67,9 @@ def ensure_bucket_exists(s3_client, bucket: str, region: str) -> None:
 def upload_layer_to_s3(zip_path: Path, bucket: str, region: str) -> str:
     s3_client = boto3.client("s3", region_name=region)
     ensure_bucket_exists(s3_client, bucket, region)
-    key = f"lambda-layers/{zip_path.stem}-{datetime.utcnow():%Y%m%d-%H%M%S}.zip"
+    key = (
+        f"lambda-layers/{zip_path.stem}-{datetime.now(timezone.utc):%Y%m%d-%H%M%S}.zip"
+    )
     log("INFO", f"Uploading layer to s3://{bucket}/{key}")
     s3_client.upload_file(str(zip_path), bucket, key)
     return key
