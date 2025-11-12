@@ -39,10 +39,10 @@ fi
 
 # Check for the presence of pydantic_core._pydantic_core binary
 echo "Checking for pydantic_core._pydantic_core binary..."
-if [ -f "$CHALICE_APP_DIR/layer/python/pydantic_core/_pydantic_core.cpython-310-x86_64-linux-gnu.so" ] || \
-   [ -f "$CHALICE_APP_DIR/layer/python/pydantic_core/_pydantic_core.cpython-310-linux-x86_64.so" ] || \
-   [ -f "$CHALICE_APP_DIR/layer/python/pydantic_core/_pydantic_core.cpython-39-x86_64-linux-gnu.so" ] || \
-   [ -f "$CHALICE_APP_DIR/layer/python/pydantic_core/_pydantic_core.cpython-39-linux-x86_64.so" ]; then
+if [ -f "$CHALICE_APP_DIR/layer/python/pydantic_core/_pydantic_core.cpython-312-x86_64-linux-gnu.so" ] || \
+   [ -f "$CHALICE_APP_DIR/layer/python/pydantic_core/_pydantic_core.cpython-312-linux-x86_64.so" ] || \
+   [ -f "$CHALICE_APP_DIR/layer/python/pydantic_core/_pydantic_core.cpython-310-x86_64-linux-gnu.so" ] || \
+   [ -f "$CHALICE_APP_DIR/layer/python/pydantic_core/_pydantic_core.cpython-310-linux-x86_64.so" ]; then
     echo "✅ pydantic_core._pydantic_core binary is present (x86_64 for Lambda)."
     echo "   Note: Local import test skipped (requires x86_64 architecture)"
 else

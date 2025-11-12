@@ -23,7 +23,7 @@
     },
     "chalice-test": {
       "api_gateway_stage": "chalice-test",
-      "runtime": "python3.10",
+      "runtime": "python3.12",
       "environment_variables": {
         "SESSIONS_TABLE_V2_NAME": "SessionsTableV2",
         "CONNECTIONS_TABLE_NAME": "WebSocketConnectionsV2",

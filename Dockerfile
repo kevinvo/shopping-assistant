@@ -1,4 +1,4 @@
-FROM python:3.10-slim-bullseye AS builder
+FROM python:3.12-slim-bookworm AS builder
 
 # Combine system dependency installation and cleanup in one layer
 RUN apt-get update && \
@@ -23,7 +23,7 @@ RUN pip install \
     --platform manylinux2014_x86_64 \
     --target python \
     --implementation cp \
-    --python-version 3.10 \
+    --python-version 3.12 \
     --only-binary=:all: \
     --no-cache-dir \
     numpy==1.26.4
@@ -40,7 +40,7 @@ RUN pip install \
     --platform manylinux2014_x86_64 \
     --target python \
     --implementation cp \
-    --python-version 3.10 \
+    --python-version 3.12 \
     --only-binary=:all: \
     --no-cache-dir \
     pandas==1.4.4 \
@@ -54,7 +54,7 @@ RUN pip install \
     --target python \
     --platform manylinux2014_x86_64 \
     --implementation cp \
-    --python-version 3.10 \
+    --python-version 3.12 \
     --only-binary=:all: \
     --no-cache-dir \
     -r requirements.txt

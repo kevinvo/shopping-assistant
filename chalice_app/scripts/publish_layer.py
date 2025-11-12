@@ -96,7 +96,7 @@ def publish_layer(
                 LayerName=layer_name,
                 Description="Dependencies for shopping-assistant Chalice app",
                 Content={"S3Bucket": bucket, "S3Key": key},
-                CompatibleRuntimes=["python3.9", "python3.10"],
+                CompatibleRuntimes=["python3.12"],
             )
         else:
             log("INFO", "Publishing layer via direct upload")
@@ -104,7 +104,7 @@ def publish_layer(
                 LayerName=layer_name,
                 Description="Dependencies for shopping-assistant Chalice app",
                 ZipFile=zip_path.read_bytes(),
-                CompatibleRuntimes=["python3.9", "python3.10"],
+                CompatibleRuntimes=["python3.12"],
             )
     except ClientError as exc:
         raise PublishError(

@@ -28,7 +28,7 @@ from constructs import Construct
 import time
 
 # Define a constant for the Lambda runtime
-LAMBDA_RUNTIME = lambda_.Runtime.PYTHON_3_9
+LAMBDA_RUNTIME = lambda_.Runtime.PYTHON_3_12
 
 
 @dataclass(frozen=True)

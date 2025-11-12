@@ -98,7 +98,7 @@ The application is built on AWS using a serverless architecture with the followi
 
 ## Prerequisites
 
-- **Python**: 3.9+
+- **Python**: 3.12+
 - **Node.js**: 18+ (for CDK)
 - **AWS CLI**: Configured with appropriate credentials
 - **Docker**: For building Lambda layers
