@@ -35,18 +35,25 @@ RUN pip install \
     portalocker==2.8.2 \
     qdrant-client==1.13.3
 
-# Install pydantic-core separately to ensure it installs correctly for Python 3.12
-# Install without platform restrictions to allow pip to select the correct wheel for the actual runtime
-# Verify the binary extension file exists after installation
+# Install pydantic and pydantic-core FIRST to ensure compatibility
+# Install without --only-binary to allow pydantic-core to install the correct Python 3.12 wheel
 RUN pip install \
     --target python \
     --no-cache-dir \
-    --upgrade \
-    pydantic-core>=2.27.1 && \
-    (find python/pydantic_core -name "_pydantic_core*.so" -o -name "_pydantic_core*.pyd" | head -1 | xargs test -f && echo "pydantic_core binary extension found") || \
-    (echo "Warning: pydantic_core binary extension not found, checking installed files..." && ls -la python/pydantic_core/ | head -20 && true)
+    pydantic==2.10.2 \
+    "pydantic-core>=2.27.1,<3.0" && \
+    if [ -f python/pydantic_core/_pydantic_core.cpython-312-x86_64-linux-gnu.so ] || \
+       [ -f python/pydantic_core/_pydantic_core.cpython-312-linux-x86_64.so ] || \
+       find python/pydantic_core -name "_pydantic_core*.so" 2>/dev/null | grep -q .; then \
+        echo "✅ pydantic_core binary extension found"; \
+    else \
+        echo "⚠️  Warning: pydantic_core binary extension not found"; \
+        ls -la python/pydantic_core/ 2>/dev/null | head -20; \
+        exit 1; \
+    fi
 
-# Install other packages
+# Install other packages (with binary-only for most packages)
+# Use --no-deps for langchain-core to prevent it from upgrading pydantic
 RUN pip install \
     --platform manylinux2014_x86_64 \
     --target python \
@@ -56,8 +63,11 @@ RUN pip install \
     --no-cache-dir \
     pandas==2.2.0 \
     tiktoken==0.5.2 \
-    regex==2023.12.25 \
-    pydantic==2.10.2 \
+    regex==2023.12.25 && \
+    pip install \
+    --target python \
+    --no-cache-dir \
+    --no-deps \
     langchain-core==0.3.76 \
     langchain==0.3.27 && \
     pip install \
@@ -67,7 +77,25 @@ RUN pip install \
     --python-version 3.12 \
     --only-binary=:all: \
     --no-cache-dir \
-    -r requirements.txt
+    -r requirements.txt && \
+    # Reinstall pydantic and pydantic-core to ensure correct versions after requirements.txt
+    pip install \
+    --target python \
+    --no-cache-dir \
+    --force-reinstall \
+    --no-deps \
+    pydantic==2.10.2 \
+    "pydantic-core>=2.27.1,<3.0" && \
+    # Verify pydantic-core binary extension is still present
+    if [ -f python/pydantic_core/_pydantic_core.cpython-312-x86_64-linux-gnu.so ] || \
+       [ -f python/pydantic_core/_pydantic_core.cpython-312-linux-x86_64.so ] || \
+       find python/pydantic_core -name "_pydantic_core*.so" 2>/dev/null | grep -q .; then \
+        echo "✅ pydantic_core binary extension verified after requirements.txt"; \
+    else \
+        echo "❌ ERROR: pydantic_core binary extension missing after requirements.txt"; \
+        ls -la python/pydantic_core/ 2>/dev/null | head -20; \
+        exit 1; \
+    fi
 
 # Cleanup and optimization (excluding qdrant-client, portalocker, and pydantic_core)
 RUN cd python/ && \
