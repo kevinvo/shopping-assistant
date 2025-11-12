@@ -36,11 +36,15 @@ RUN pip install \
     qdrant-client==1.13.3
 
 # Install pydantic-core separately to ensure it installs correctly for Python 3.12
-# Note: Installing without platform restriction to allow pip to find the correct wheel
+# Install without platform restrictions to allow pip to select the correct wheel for the actual runtime
+# Verify the binary extension file exists after installation
 RUN pip install \
     --target python \
     --no-cache-dir \
-    pydantic-core>=2.27.1
+    --upgrade \
+    pydantic-core>=2.27.1 && \
+    (find python/pydantic_core -name "_pydantic_core*.so" -o -name "_pydantic_core*.pyd" | head -1 | xargs test -f && echo "pydantic_core binary extension found") || \
+    (echo "Warning: pydantic_core binary extension not found, checking installed files..." && ls -la python/pydantic_core/ | head -20 && true)
 
 # Install other packages
 RUN pip install \
@@ -107,19 +111,19 @@ RUN cd python/ && \
     rm -rf pandas/core/tools && \
     rm -rf pandas/core/window
 
-# Final cleanup (excluding qdrant-client and portalocker)
+# Final cleanup (excluding qdrant-client, portalocker, and pydantic_core)
 RUN cd python/ && \
-    find . -type f -name "*test*.py" -not -path "*/anyio/*" -not -path "*/numpy/*" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -delete && \
-    find . -type d -name "*test*" -not -path "*/anyio/*" -not -path "*/numpy/*" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -exec rm -rf {} + && \
-    find . -type f -name "*.pxi" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -delete && \
-    find . -type f -name "*.pxd" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -delete && \
-    find . -type f -name "*.pyx" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -delete && \
-    find . -type f -name "*.ipynb" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -delete && \
-    find . -type d -name "examples" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -exec rm -rf {} + && \
-    find . -type d -name "demo" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -exec rm -rf {} + && \
-    find . -type d -name "scripts" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -exec rm -rf {} + && \
-    find . -type d -name ".github" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -exec rm -rf {} + && \
-    find . -type d -name ".pytest_cache" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -exec rm -rf {} +
+    find . -type f -name "*test*.py" -not -path "*/anyio/*" -not -path "*/numpy/*" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -not -path "*/pydantic_core*/*" -delete && \
+    find . -type d -name "*test*" -not -path "*/anyio/*" -not -path "*/numpy/*" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -not -path "*/pydantic_core*/*" -exec rm -rf {} + && \
+    find . -type f -name "*.pxi" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -not -path "*/pydantic_core*/*" -delete && \
+    find . -type f -name "*.pxd" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -not -path "*/pydantic_core*/*" -delete && \
+    find . -type f -name "*.pyx" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -not -path "*/pydantic_core*/*" -delete && \
+    find . -type f -name "*.ipynb" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -not -path "*/pydantic_core*/*" -delete && \
+    find . -type d -name "examples" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -not -path "*/pydantic_core*/*" -exec rm -rf {} + && \
+    find . -type d -name "demo" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -not -path "*/pydantic_core*/*" -exec rm -rf {} + && \
+    find . -type d -name "scripts" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -not -path "*/pydantic_core*/*" -exec rm -rf {} + && \
+    find . -type d -name ".github" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -not -path "*/pydantic_core*/*" -exec rm -rf {} + && \
+    find . -type d -name ".pytest_cache" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -not -path "*/pydantic_core*/*" -exec rm -rf {} +
 
 # Final stage
 FROM busybox:latest

@@ -190,6 +190,13 @@
         "s3:DeleteObject"
       ],
       "Resource": "arn:aws:s3:::shopping-assistant-processed-reddit-data/*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "sns:Publish"
+      ],
+      "Resource": "arn:aws:sns:ap-southeast-1:979920756619:job-failure-alerts"
     }
   ]
 }
