@@ -357,6 +357,31 @@ def main(argv: List[str]) -> int:
         log("ERROR", f"Layer attachment failed: {exc}")
         return 1
 
+    # Update function runtimes to Python 3.12 (Chalice doesn't respect runtime in config.json)
+    try:
+        log("INFO", "Updating function runtimes to Python 3.12...")
+        update_runtime_script = scripts_dir / "update_function_runtimes.py"
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(update_runtime_script),
+                "--stage",
+                args.stage,
+                "--region",
+                args.region,
+            ],
+            cwd=app_dir,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            log("WARN", f"Runtime update had issues: {result.stderr}")
+        else:
+            log("INFO", "✅ Function runtimes updated to Python 3.12")
+    except Exception as exc:
+        log("WARN", f"Runtime update failed (non-blocking): {exc}")
+
     # Validate mapping and SQS backlog.
     try:
         ensure_post_deploy(
