@@ -229,12 +229,25 @@ class DeepSeekClient(BaseLLM):
         self.client = OpenAI(
             api_key=self.config.openrouter_api_key,
             base_url="https://openrouter.ai/api/v1",
-            default_headers={
-                "HTTP-Referer": "https://github.com/your-org/shopping-assistant-agent",
-                "X-Title": "Shopping Assistant Agent",
-            },
+            default_headers=self._build_headers(),
         )
         self.model = "deepseek/deepseek-chat"
+
+    def _build_headers(self) -> Dict[str, str]:
+        """Build headers for OpenRouter requests, including DeepSeek API key if available."""
+        headers = {
+            "HTTP-Referer": "https://github.com/your-org/shopping-assistant-agent",
+            "X-Title": "Shopping Assistant Agent",
+        }
+        # Add DeepSeek provider key if available (OpenRouter will use it to accumulate rate limits)
+        try:
+            deepseek_key = self.config.deepseek_api_key
+            if deepseek_key:
+                headers["X-DeepSeek-Key"] = deepseek_key
+        except ValueError:
+            # DeepSeek key not configured, that's okay - OpenRouter will use shared rate limits
+            pass
+        return headers
 
     @measure_execution_time
     @traceable(name="deepseek_chat")
@@ -260,10 +273,7 @@ class DeepSeekClient(BaseLLM):
                 top_p=kwargs.get("top_p", 0.95),
                 max_tokens=kwargs.get("max_tokens", 2000),  # type: ignore[arg-type]
                 model_kwargs=model_kwargs,
-                default_headers={
-                    "HTTP-Referer": "https://github.com/your-org/shopping-assistant-agent",
-                    "X-Title": "Shopping Assistant Agent",
-                },
+                default_headers=self._build_headers(),
             )
 
             # Use LangChain client which will automatically track with LangSmith
