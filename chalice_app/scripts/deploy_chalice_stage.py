@@ -19,7 +19,9 @@ from botocore.exceptions import ClientError
 DEFAULT_REGION = "ap-southeast-1"
 DEFAULT_MAX_ATTEMPTS = 2
 DEFAULT_MAX_VISIBLE_MESSAGES = 10
-DEFAULT_MAX_INFLIGHT_MESSAGES = 5
+DEFAULT_MAX_INFLIGHT_MESSAGES = (
+    20  # Increased to allow for concurrent Lambda processing
+)
 
 
 def log(level: str, message: str) -> None:
@@ -198,6 +200,8 @@ def ensure_post_deploy(
     region: str,
     max_visible: int,
     max_inflight: int,
+    max_retries: int = 3,
+    retry_delay: int = 10,
 ) -> None:
     lambda_client = boto3.client("lambda", region_name=region)
     sqs_client = boto3.client("sqs", region_name=region)
@@ -216,26 +220,59 @@ def ensure_post_deploy(
     if not queue_url:
         raise DeployError("CHAT_PROCESSING_QUEUE_URL not configured")
 
-    attrs = sqs_client.get_queue_attributes(
-        QueueUrl=queue_url,
-        AttributeNames=[
-            "ApproximateNumberOfMessages",
-            "ApproximateNumberOfMessagesNotVisible",
-        ],
-    )
-    visible = int(attrs["Attributes"].get("ApproximateNumberOfMessages", 0))
-    inflight = int(attrs["Attributes"].get("ApproximateNumberOfMessagesNotVisible", 0))
-
-    log("INFO", f"SQS backlog: visible={visible}, inflight={inflight}")
-
-    if visible > max_visible:
-        raise DeployError(
-            f"Visible SQS messages ({visible}) exceed threshold ({max_visible})"
+    # Retry checking SQS backlog to allow in-flight messages to complete
+    for attempt in range(max_retries):
+        attrs = sqs_client.get_queue_attributes(
+            QueueUrl=queue_url,
+            AttributeNames=[
+                "ApproximateNumberOfMessages",
+                "ApproximateNumberOfMessagesNotVisible",
+            ],
         )
-    if inflight > max_inflight:
-        raise DeployError(
-            f"In-flight SQS messages ({inflight}) exceed threshold ({max_inflight})"
+        visible = int(attrs["Attributes"].get("ApproximateNumberOfMessages", 0))
+        inflight = int(
+            attrs["Attributes"].get("ApproximateNumberOfMessagesNotVisible", 0)
         )
+
+        log(
+            "INFO",
+            f"SQS backlog (attempt {attempt + 1}/{max_retries}): visible={visible}, inflight={inflight}",
+        )
+
+        # Check thresholds
+        if visible > max_visible:
+            if attempt < max_retries - 1:
+                log(
+                    "WARN",
+                    f"Visible messages ({visible}) exceed threshold ({max_visible}), waiting {retry_delay}s...",
+                )
+                time.sleep(retry_delay)
+                continue
+            raise DeployError(
+                f"Visible SQS messages ({visible}) exceed threshold ({max_visible}) after {max_retries} attempts"
+            )
+
+        if inflight > max_inflight:
+            if attempt < max_retries - 1:
+                log(
+                    "WARN",
+                    f"In-flight messages ({inflight}) exceed threshold ({max_inflight}), waiting {retry_delay}s for processing to complete...",
+                )
+                time.sleep(retry_delay)
+                continue
+            raise DeployError(
+                f"In-flight SQS messages ({inflight}) exceed threshold ({max_inflight}) after {max_retries} attempts"
+            )
+
+        # Both checks passed
+        log(
+            "INFO",
+            f"✅ SQS backlog within thresholds: visible={visible}, inflight={inflight}",
+        )
+        return
+
+    # Should not reach here, but just in case
+    raise DeployError("SQS backlog validation failed after all retries")
 
 
 def attach_layer(stage: str, region: str, scripts_dir: Path) -> None:
