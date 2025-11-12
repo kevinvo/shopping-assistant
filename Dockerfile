@@ -35,6 +35,13 @@ RUN pip install \
     portalocker==2.8.2 \
     qdrant-client==1.13.3
 
+# Install pydantic-core separately to ensure it installs correctly for Python 3.12
+# Note: Installing without platform restriction to allow pip to find the correct wheel
+RUN pip install \
+    --target python \
+    --no-cache-dir \
+    pydantic-core>=2.27.1
+
 # Install other packages
 RUN pip install \
     --platform manylinux2014_x86_64 \
@@ -47,7 +54,6 @@ RUN pip install \
     tiktoken==0.5.2 \
     regex==2023.12.25 \
     pydantic==2.10.2 \
-    pydantic-core==2.27.1 \
     langchain-core==0.3.76 \
     langchain==0.3.27 && \
     pip install \
@@ -59,22 +65,22 @@ RUN pip install \
     --no-cache-dir \
     -r requirements.txt
 
-# Cleanup and optimization (excluding qdrant-client and portalocker)
+# Cleanup and optimization (excluding qdrant-client, portalocker, and pydantic_core)
 RUN cd python/ && \
-    find . -type d -name "tests" -not -path "*/anyio/*" -not -path "*/langchain*/*" -not -path "*/numpy/*" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -exec rm -rf {} + && \
-    find . -type d -name "__pycache__" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -exec rm -rf {} + && \
-    find . -type f -name "*.pyc" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -delete && \
-    find . -type f -name "*.pyo" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -delete && \
-    find . -type f -name "*.pyd" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -delete && \
-    find . -type d -name "*.dist-info" -not -name "qdrant_client*.dist-info" -not -name "portalocker*.dist-info" -exec rm -rf {} + && \
-    find . -type d -name "*.egg-info" -not -name "qdrant_client*.egg-info" -not -name "portalocker*.egg-info" -exec rm -rf {} + && \
-    find . -type f -name "*.md" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -delete && \
-    find . -type f -name "*.txt" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -delete && \
-    find . -type f -name "*.h" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -delete && \
-    find . -type f -name "*.c" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -delete && \
-    find . -type f -name "*.cpp" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -delete && \
-    find . -type f -name "*.html" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -delete && \
-    find . -type f -name "*.rst" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -delete && \
+    find . -type d -name "tests" -not -path "*/anyio/*" -not -path "*/langchain*/*" -not -path "*/numpy/*" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -not -path "*/pydantic_core*/*" -exec rm -rf {} + && \
+    find . -type d -name "__pycache__" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -not -path "*/pydantic_core*/*" -exec rm -rf {} + && \
+    find . -type f -name "*.pyc" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -not -path "*/pydantic_core*/*" -delete && \
+    find . -type f -name "*.pyo" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -not -path "*/pydantic_core*/*" -delete && \
+    find . -type f -name "*.pyd" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -not -path "*/pydantic_core*/*" -delete && \
+    find . -type d -name "*.dist-info" -not -name "qdrant_client*.dist-info" -not -name "portalocker*.dist-info" -not -name "pydantic_core*.dist-info" -exec rm -rf {} + && \
+    find . -type d -name "*.egg-info" -not -name "qdrant_client*.egg-info" -not -name "portalocker*.egg-info" -not -name "pydantic_core*.egg-info" -exec rm -rf {} + && \
+    find . -type f -name "*.md" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -not -path "*/pydantic_core*/*" -delete && \
+    find . -type f -name "*.txt" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -not -path "*/pydantic_core*/*" -delete && \
+    find . -type f -name "*.h" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -not -path "*/pydantic_core*/*" -delete && \
+    find . -type f -name "*.c" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -not -path "*/pydantic_core*/*" -delete && \
+    find . -type f -name "*.cpp" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -not -path "*/pydantic_core*/*" -delete && \
+    find . -type f -name "*.html" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -not -path "*/pydantic_core*/*" -delete && \
+    find . -type f -name "*.rst" -not -path "*/qdrant_client*/*" -not -path "*/portalocker*/*" -not -path "*/pydantic_core*/*" -delete && \
     # Remove pandas directories that aren't needed
     rm -rf pandas/tests && \
     rm -rf pandas/doc && \
