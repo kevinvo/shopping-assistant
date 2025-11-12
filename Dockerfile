@@ -38,7 +38,7 @@ RUN pip install \
     --target python \
     --no-cache-dir \
     portalocker==2.8.2 \
-    qdrant-client==1.13.3
+    qdrant-client==1.15.1
 
 # Install pydantic and pydantic-core FIRST to ensure compatibility
 # Langsmith requires pydantic>=1,<3 which resolves to pydantic 2.12.4 (requires pydantic-core 2.41.5)
