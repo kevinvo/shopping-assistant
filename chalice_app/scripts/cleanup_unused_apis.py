@@ -157,8 +157,19 @@ def main(argv: List[str]) -> int:
     parser.add_argument(
         "--delay-seconds",
         type=float,
-        default=2.0,
-        help="Delay between deletions to avoid rate limiting (default: 2.0)",
+        default=0.5,
+        help="Delay between deletions to avoid rate limiting (default: 0.5)",
+    )
+    parser.add_argument(
+        "--api-name-filter",
+        default="shopping-assistant-api",
+        help="Only delete APIs matching this name (default: shopping-assistant-api)",
+    )
+    parser.add_argument(
+        "--countdown-seconds",
+        type=int,
+        default=2,
+        help="Countdown before deletion starts (default: 2)",
     )
 
     args = parser.parse_args(argv)
@@ -172,6 +183,7 @@ def main(argv: List[str]) -> int:
     log("INFO", f"Chalice app dir: {args.chalice_app_dir}")
     log("INFO", f"Mode: {'DRY-RUN' if dry_run else 'EXECUTE'}")
     log("INFO", f"Minimum age: {args.min_age_days} days")
+    log("INFO", f"API name filter: {args.api_name_filter}")
     log("INFO", "")
 
     # Load active APIs from deployed state
@@ -202,6 +214,14 @@ def main(argv: List[str]) -> int:
 
         # Skip if API is in active list
         if api_id in active_api_ids:
+            continue
+
+        # Only delete APIs matching the filter name
+        if args.api_name_filter and api_name != args.api_name_filter:
+            log(
+                "INFO",
+                f"Skipping API {api_id} ({api_name}) - doesn't match filter '{args.api_name_filter}'",
+            )
             continue
 
         # Check age
@@ -273,12 +293,12 @@ def main(argv: List[str]) -> int:
 
     # Confirm deletion
     log("WARN", "⚠️  EXECUTE mode: About to delete the APIs listed above")
-    log("WARN", "   Press Ctrl+C within 5 seconds to cancel...")
+    log("WARN", f"   Press Ctrl+C within {args.countdown_seconds} seconds to cancel...")
 
     try:
         import time
 
-        for i in range(5, 0, -1):
+        for i in range(args.countdown_seconds, 0, -1):
             print(f"\r   Starting deletion in {i} seconds...", end="", flush=True)
             time.sleep(1)
         print()  # New line after countdown
