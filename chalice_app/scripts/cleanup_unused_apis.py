@@ -75,27 +75,46 @@ def list_all_rest_apis(region: str) -> List[Dict]:
 
 
 def delete_rest_api(
-    api_id: str, api_name: str, region: str, dry_run: bool = True
+    api_id: str, api_name: str, region: str, dry_run: bool = True, max_retries: int = 3
 ) -> bool:
-    """Delete a REST API."""
+    """Delete a REST API with retry logic for rate limiting."""
     if dry_run:
         log("DRY-RUN", f"Would delete API {api_id} ({api_name})")
         return True
 
     apigateway = boto3.client("apigateway", region_name=region)
+    import time
 
-    try:
-        apigateway.delete_rest_api(restApiId=api_id)
-        log("INFO", f"✅ Deleted API {api_id} ({api_name})")
-        return True
-    except ClientError as e:
-        error_code = e.response.get("Error", {}).get("Code", "")
-        if error_code == "NotFoundException":
-            log("WARN", f"API {api_id} not found (may have been deleted already)")
+    for attempt in range(max_retries):
+        try:
+            apigateway.delete_rest_api(restApiId=api_id)
+            log("INFO", f"✅ Deleted API {api_id} ({api_name})")
             return True
-        else:
-            log("ERROR", f"Failed to delete API {api_id}: {e}")
-            return False
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code", "")
+            if error_code == "NotFoundException":
+                log("WARN", f"API {api_id} not found (may have been deleted already)")
+                return True
+            elif error_code == "TooManyRequestsException":
+                if attempt < max_retries - 1:
+                    wait_time = (2**attempt) * 2  # Exponential backoff: 2s, 4s, 8s
+                    log(
+                        "WARN",
+                        f"Rate limited deleting {api_id}, retrying in {wait_time}s... (attempt {attempt + 1}/{max_retries})",
+                    )
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    log(
+                        "ERROR",
+                        f"Failed to delete API {api_id} after {max_retries} attempts: {e}",
+                    )
+                    return False
+            else:
+                log("ERROR", f"Failed to delete API {api_id}: {e}")
+                return False
+
+    return False
 
 
 def format_date(date_str: Optional[str]) -> str:
@@ -157,8 +176,8 @@ def main(argv: List[str]) -> int:
     parser.add_argument(
         "--delay-seconds",
         type=float,
-        default=0.5,
-        help="Delay between deletions to avoid rate limiting (default: 0.5)",
+        default=1.0,
+        help="Delay between deletions to avoid rate limiting (default: 1.0)",
     )
     parser.add_argument(
         "--api-name-filter",

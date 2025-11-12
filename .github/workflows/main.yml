@@ -111,7 +111,7 @@ jobs:
         python scripts/cleanup_unused_apis.py \
           --region ${{ env.AWS_REGION }} \
           --min-age-days 0 \
-          --delay-seconds 0.5 \
+          --delay-seconds 1.0 \
           --countdown-seconds 2 \
           --api-name-filter shopping-assistant-api \
           --execute || echo "API cleanup completed with warnings (non-blocking)"
