@@ -102,6 +102,18 @@ jobs:
       run: |
         python .github/scripts/prune_lambda_policy.py --stage chalice-test --region ${{ env.AWS_REGION }}
     
+    - name: Cleanup Unused API Gateway REST APIs
+      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      working-directory: chalice_app
+      continue-on-error: true
+      run: |
+        echo "Cleaning up unused API Gateway REST APIs before deployment..."
+        python scripts/cleanup_unused_apis.py \
+          --region ${{ env.AWS_REGION }} \
+          --min-age-days 0 \
+          --delay-seconds 2.0 \
+          --execute || echo "API cleanup completed with warnings (non-blocking)"
+
     - name: Deploy Chalice stage with validation
       if: github.ref == 'refs/heads/main' && github.event_name == 'push'
       run: |
