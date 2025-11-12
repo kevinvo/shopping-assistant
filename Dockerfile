@@ -43,7 +43,7 @@ RUN pip install \
     --python-version 3.12 \
     --only-binary=:all: \
     --no-cache-dir \
-    pandas==1.4.4 \
+    pandas==2.2.0 \
     tiktoken==0.5.2 \
     regex==2023.12.25 \
     pydantic==2.10.2 \
