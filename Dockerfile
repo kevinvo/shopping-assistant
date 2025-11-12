@@ -79,13 +79,18 @@ RUN pip install \
     --no-cache-dir \
     -r requirements.txt && \
     # Reinstall pydantic and pydantic-core to ensure correct versions after requirements.txt
+    # Remove conflicting pydantic-core versions first (both dist-info and package), then reinstall both together
+    # Use --platform flag to ensure x86_64 architecture (Lambda requirement)
+    rm -rf python/pydantic_core* python/pydantic*.dist-info && \
     pip install \
-    --target python \
-    --no-cache-dir \
-    --force-reinstall \
-    --no-deps \
-    pydantic==2.10.2 \
-    "pydantic-core>=2.27.1,<3.0" && \
+        --platform manylinux2014_x86_64 \
+        --target python \
+        --implementation cp \
+        --python-version 3.12 \
+        --only-binary=:all: \
+        --no-cache-dir \
+        pydantic==2.10.2 \
+        "pydantic-core>=2.27.1,<3.0" && \
     # Verify pydantic-core binary extension is still present
     if [ -f python/pydantic_core/_pydantic_core.cpython-312-x86_64-linux-gnu.so ] || \
        [ -f python/pydantic_core/_pydantic_core.cpython-312-linux-x86_64.so ] || \
