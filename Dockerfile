@@ -1,4 +1,4 @@
-# Use Amazon Linux 2023 to match Lambda Python 3.12 runtime environment exactly
+# Use Amazon Linux 2023 to match Lambda Python 3.12 runtime environment
 # Lambda Python 3.12 runs on Amazon Linux 2023, so building here ensures compatibility
 FROM amazonlinux:2023 AS builder
 
@@ -41,12 +41,12 @@ RUN pip install \
     qdrant-client==1.13.3
 
 # Install pydantic and pydantic-core FIRST to ensure compatibility
-# Install without --only-binary to allow pydantic-core to install the correct Python 3.12 wheel
+# pydantic 2.10.2 requires pydantic-core 2.41.5, but we need Python 3.12 compatible version
+# Let pip resolve the compatible version automatically
 RUN pip install \
     --target python \
     --no-cache-dir \
-    pydantic==2.10.2 \
-    "pydantic-core>=2.27.1,<3.0" && \
+    pydantic==2.10.2 && \
     if [ -f python/pydantic_core/_pydantic_core.cpython-312-x86_64-linux-gnu.so ] || \
        [ -f python/pydantic_core/_pydantic_core.cpython-312-linux-x86_64.so ] || \
        find python/pydantic_core -name "_pydantic_core*.so" 2>/dev/null | grep -q .; then \
@@ -94,8 +94,7 @@ RUN pip install \
         --python-version 3.12 \
         --only-binary=:all: \
         --no-cache-dir \
-        pydantic==2.10.2 \
-        "pydantic-core>=2.27.1,<3.0" && \
+        pydantic==2.10.2 && \
     # Verify pydantic-core binary extension is still present
     if [ -f python/pydantic_core/_pydantic_core.cpython-312-x86_64-linux-gnu.so ] || \
        [ -f python/pydantic_core/_pydantic_core.cpython-312-linux-x86_64.so ] || \
