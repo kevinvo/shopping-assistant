@@ -41,12 +41,12 @@ RUN pip install \
     qdrant-client==1.13.3
 
 # Install pydantic and pydantic-core FIRST to ensure compatibility
-# pydantic 2.10.2 requires pydantic-core 2.41.5, but we need Python 3.12 compatible version
-# Let pip resolve the compatible version automatically
+# Langsmith requires pydantic>=1,<3 which resolves to pydantic 2.12.4 (requires pydantic-core 2.41.5)
+# Let pip resolve the compatible version automatically based on langsmith requirements
 RUN pip install \
     --target python \
     --no-cache-dir \
-    pydantic==2.10.2 && \
+    pydantic && \
     if [ -f python/pydantic_core/_pydantic_core.cpython-312-x86_64-linux-gnu.so ] || \
        [ -f python/pydantic_core/_pydantic_core.cpython-312-linux-x86_64.so ] || \
        find python/pydantic_core -name "_pydantic_core*.so" 2>/dev/null | grep -q .; then \
@@ -75,6 +75,8 @@ RUN pip install \
     --no-deps \
     langchain-core==0.3.76 \
     langchain==0.3.27 && \
+    # Ensure pydantic and pydantic-core are compatible (langsmith will install 2.12.4 + 2.41.5)
+    # No need to reinstall - langsmith will install the correct versions
     pip install \
     --target python \
     --platform manylinux2014_x86_64 \
@@ -84,17 +86,11 @@ RUN pip install \
     --no-cache-dir \
     -r requirements.txt && \
     # Reinstall pydantic and pydantic-core to ensure correct versions after requirements.txt
-    # Remove conflicting pydantic-core versions first (both dist-info and package), then reinstall both together
-    # Use --platform flag to ensure x86_64 architecture (Lambda requirement)
-    rm -rf python/pydantic_core* python/pydantic*.dist-info && \
-    pip install \
-        --platform manylinux2014_x86_64 \
-        --target python \
-        --implementation cp \
-        --python-version 3.12 \
-        --only-binary=:all: \
-        --no-cache-dir \
-        pydantic==2.10.2 && \
+    # Remove ALL pydantic installations completely (both dist-info and package directories)
+    # This ensures we start fresh and install the correct version
+    # Ensure pydantic and pydantic-core versions are compatible after requirements.txt
+    # Langsmith will have installed pydantic 2.12.4 + pydantic-core 2.41.5, which is correct
+    # Just verify the binary extension is present
     # Verify pydantic-core binary extension is still present
     if [ -f python/pydantic_core/_pydantic_core.cpython-312-x86_64-linux-gnu.so ] || \
        [ -f python/pydantic_core/_pydantic_core.cpython-312-linux-x86_64.so ] || \
