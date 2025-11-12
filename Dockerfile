@@ -1,16 +1,21 @@
-FROM python:3.12-slim-bookworm AS builder
+# Use Amazon Linux 2023 to match Lambda Python 3.12 runtime environment exactly
+# Lambda Python 3.12 runs on Amazon Linux 2023, so building here ensures compatibility
+FROM amazonlinux:2023 AS builder
 
-# Combine system dependency installation and cleanup in one layer
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
+# Install Python 3.12 and build dependencies
+RUN dnf install -y \
+    python3.12 \
+    python3.12-devel \
+    python3.12-pip \
     gcc \
-    python3-dev \
-    build-essential \
-    zlib1g-dev \
-    libc6-dev && \
-    rm -rf /var/lib/apt/lists/* && \
-    rm -rf /usr/share/doc && \
-    rm -rf /usr/share/man
+    gcc-c++ \
+    zlib-devel \
+    && dnf clean all \
+    && rm -rf /var/cache/dnf
+
+# Create symlinks for python and pip to use Python 3.12
+RUN ln -sf /usr/bin/python3.12 /usr/bin/python && \
+    ln -sf /usr/bin/pip3.12 /usr/bin/pip
 
 WORKDIR /lambda-layer
 
