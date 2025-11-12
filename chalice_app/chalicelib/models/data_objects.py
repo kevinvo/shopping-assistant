@@ -2,7 +2,7 @@ from dataclasses import dataclass, asdict, field
 from typing import Dict, Any, Union, List, Optional, TYPE_CHECKING
 from enum import Enum
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 if TYPE_CHECKING:
     from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
@@ -235,7 +235,9 @@ class EvaluationMessage:
     session_id: str
     request_id: str
     metadata: Dict[str, Any] = field(default_factory=dict)
-    timestamp: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    timestamp: str = field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize the evaluation message to a dictionary."""
@@ -257,7 +259,7 @@ class EvaluationMessage:
             session_id=data.get("session_id", ""),
             request_id=data.get("request_id", ""),
             metadata=data.get("metadata", {}) or {},
-            timestamp=data.get("timestamp") or datetime.utcnow().isoformat(),
+            timestamp=data.get("timestamp") or datetime.now(timezone.utc).isoformat(),
         )
 
 
