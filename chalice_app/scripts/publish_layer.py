@@ -86,12 +86,6 @@ def prune_layer_contents(layer_dir: Path) -> None:
         ("langchain*/**/tests", "Strip LangChain test suites.", True),
         ("langchain*/**/__pycache__", "Prune pycache directories.", True),
         (
-            "grpc_tools",
-            "gRPC tooling is only needed for code generation, not Lambda runtime.",
-            False,
-        ),
-        ("grpc_tools-*.dist-info", "Remove grpc_tools metadata.", False),
-        (
             "pandas/tests",
             "Drop pandas test data to save space.",
             True,
@@ -101,8 +95,6 @@ def prune_layer_contents(layer_dir: Path) -> None:
         ("numpy/tests", "Drop NumPy test suites.", True),
         ("numpy/**/tests", "Drop nested NumPy tests.", True),
         ("numpy/**/__pycache__", "Drop NumPy pycache directories.", True),
-        ("grpc", "gRPC runtime not used by Chalice Lambdas.", False),
-        ("grpc-*.dist-info", "Remove gRPC metadata.", False),
         ("sqlalchemy", "SQLAlchemy not used by Chalice Lambdas.", False),
         ("SQLAlchemy-*.dist-info", "Remove SQLAlchemy metadata.", False),
     ]
@@ -140,7 +132,6 @@ def prune_layer_contents(layer_dir: Path) -> None:
 
     critical_paths = [
         "pandas",
-        "grpc",
         "sqlalchemy",
         "torch",
         "transformers",
