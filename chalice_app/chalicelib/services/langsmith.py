@@ -1,7 +1,7 @@
 """LangSmith dataset logging for customer queries."""
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any, Dict, Optional
 
 from langsmith import Client
@@ -56,7 +56,7 @@ class QueryLogger:
         try:
             log_metadata: Dict[str, Any] = {
                 "session_id": session_id,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "query_length": len(query),
             }
 

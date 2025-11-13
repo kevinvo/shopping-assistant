@@ -1,9 +1,18 @@
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from chalicelib.models.data_objects import RedditPost
-from typing import List, Optional
-from langchain.schema import Document
 from dataclasses import dataclass, asdict
+from importlib import import_module
+from typing import TYPE_CHECKING, List, Optional, Type
+
+from langchain.schema import Document
+from langchain_core.embeddings import Embeddings
+from pydantic import SecretStr
+
+if TYPE_CHECKING:
+    from langchain_experimental.text_splitter import SemanticChunker  # type: ignore[import]
+    from langchain_openai import OpenAIEmbeddings  # type: ignore[import]
+
+from chalicelib.core.config import config
 from chalicelib.core.logger_config import setup_logger
+from chalicelib.models.data_objects import RedditPost
 
 logger = setup_logger(__name__)
 
@@ -22,14 +31,34 @@ class Metadata:
 
 
 class RedditChunker:
-    def __init__(self, chunk_size=1_000, chunk_overlap=200):
-        self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=chunk_size, chunk_overlap=chunk_overlap
+    def __init__(
+        self,
+        chunk_size: int = 1_000,
+        chunk_overlap: int = 200,
+        embeddings: Optional[Embeddings] = None,
+        breakpoint_threshold_type: str = "percentile",
+        breakpoint_threshold_amount: float = 95.0,
+    ):
+        if chunk_size <= 0:
+            raise ValueError("chunk_size must be greater than zero")
+        if chunk_overlap < 0:
+            raise ValueError("chunk_overlap must be zero or positive")
+
+        min_chunk_size = max(1, chunk_size - chunk_overlap)
+
+        self.embeddings = embeddings or _create_default_embeddings()
+        semantic_chunker_cls = _load_semantic_chunker()
+        self.text_splitter = semantic_chunker_cls(
+            embeddings=self.embeddings,
+            min_chunk_size=min_chunk_size,
+            max_chunk_size=chunk_size,
+            breakpoint_threshold_type=breakpoint_threshold_type,
+            breakpoint_threshold_amount=breakpoint_threshold_amount,
         )
 
     def chunk_reddit_post(self, post: RedditPost) -> List[Document]:
         full_text = f"Title: {post.title}\n\n{post.content}"
-        chunks = self.text_splitter.split_text(full_text)
+        chunks = self._split_with_fallback(full_text)
 
         # Process comments separately
         documents: List[Document] = []
@@ -57,7 +86,7 @@ class RedditChunker:
             )
 
         for comment in post.comments:
-            comment_chunks = self.text_splitter.split_text(comment.body)
+            comment_chunks = self._split_with_fallback(comment.body)
             for chunk_id, chunk in enumerate(comment_chunks):
                 documents.append(
                     Document(
@@ -79,6 +108,49 @@ class RedditChunker:
                 )
 
         return documents
+
+    def _split_with_fallback(self, text: str) -> List[str]:
+        if not text:
+            return []
+
+        chunks = self.text_splitter.split_text(text)
+        if chunks:
+            return chunks
+
+        # Ensure short documents are still indexed even if the semantic splitter
+        # filters them out by returning the original text.
+        return [text.strip()] if text.strip() else []
+
+
+def _load_semantic_chunker() -> "Type[SemanticChunker]":
+    try:
+        module = import_module("langchain_experimental.text_splitter")
+        semantic_chunker_cls: "Type[SemanticChunker]" = getattr(
+            module, "SemanticChunker"
+        )
+        return semantic_chunker_cls
+    except ImportError as exc:  # pragma: no cover
+        raise ImportError(
+            "SemanticChunker requires the langchain-experimental package. "
+            "Install it with `pip install langchain-experimental`."
+        ) from exc
+
+
+def _create_default_embeddings() -> Embeddings:
+    try:
+        module = import_module("langchain_openai")
+        openai_embeddings_cls: Type["OpenAIEmbeddings"] = getattr(
+            module, "OpenAIEmbeddings"
+        )
+    except ImportError as exc:  # pragma: no cover
+        raise ImportError(
+            "OpenAIEmbeddings requires the langchain-openai package. "
+            "Install it with `pip install langchain-openai`."
+        ) from exc
+
+    return openai_embeddings_cls(
+        api_key=SecretStr(config.openai_api_key), model="text-embedding-3-small"
+    )
 
     def process_comments(self, post, comments):
         documents: List[Document] = []
