@@ -10,6 +10,8 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
+import subprocess
+import platform
 import zipfile
 
 import boto3
@@ -100,9 +102,13 @@ def prune_layer_contents(layer_dir: Path) -> None:
             "Drop pandas test data to save space.",
             True,
         ),
+        ("pandas", "Remove pandas from Lambda layer; not required at runtime.", False),
+        ("pandas-*.dist-info", "Remove pandas metadata.", False),
         ("numpy/tests", "Drop NumPy test suites.", True),
         ("numpy/**/tests", "Drop nested NumPy tests.", True),
         ("numpy/**/__pycache__", "Drop NumPy pycache directories.", True),
+        ("grpc", "gRPC runtime not used by Chalice Lambdas.", False),
+        ("grpc-*.dist-info", "Remove gRPC metadata.", False),
     ]
 
     removed_items: list[str] = []
@@ -132,6 +138,93 @@ def prune_layer_contents(layer_dir: Path) -> None:
         log("INFO", f"Pruned {len(removed_items)} items from layer.")
     else:
         log("INFO", "No optional dependencies were pruned.")
+
+    _prune_numpy_shared_libs(python_root)
+    _strip_shared_objects(python_root)
+
+
+def _prune_numpy_shared_libs(python_root: Path) -> None:
+    numpy_libs_dir = python_root / "numpy.libs"
+    if not numpy_libs_dir.exists():
+        return
+
+    keep_prefixes = ("libopenblas", "libgfortran", "libquadmath")
+    removed = []
+
+    for shared_lib in numpy_libs_dir.iterdir():
+        if not shared_lib.is_file():
+            continue
+        if not shared_lib.name.startswith(keep_prefixes):
+            try:
+                shared_lib.unlink(missing_ok=True)
+                removed.append(shared_lib.name)
+            except Exception as exc:
+                log("WARN", f"Failed removing {shared_lib}: {exc}")
+
+    if removed:
+        log("INFO", f"Removed {len(removed)} unused NumPy shared libs: {removed}")
+
+    if platform.system() != "Linux":
+        log("INFO", "Skipping NumPy shared library stripping on non-Linux platform.")
+        return
+
+    strip_path = shutil.which("strip")
+    if strip_path is None:
+        log(
+            "INFO",
+            "strip tool not available; skipping shared library symbol stripping.",
+        )
+        return
+
+    strip_args = (
+        [strip_path, "--strip-unneeded"]
+        if platform.system() != "Darwin"
+        else [strip_path, "-S"]
+    )
+
+    for shared_lib in numpy_libs_dir.glob("*.so*"):
+        try:
+            subprocess.run(
+                strip_args + [str(shared_lib)],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception as exc:
+            log("WARN", f"Failed stripping {shared_lib}: {exc}")
+
+
+def _strip_shared_objects(python_root: Path) -> None:
+    if platform.system() != "Linux":
+        log("INFO", "Skipping shared library stripping on non-Linux platform.")
+        return
+
+    strip_path = shutil.which("strip")
+    if strip_path is None:
+        log(
+            "INFO",
+            "strip tool not available; skipping global shared library stripping.",
+        )
+        return
+
+    strip_args = (
+        [strip_path, "--strip-unneeded"]
+        if platform.system() != "Darwin"
+        else [strip_path, "-S"]
+    )
+
+    for shared_lib in python_root.rglob("*.so"):
+        if not shared_lib.is_file():
+            continue
+        try:
+            subprocess.run(
+                strip_args + [str(shared_lib)],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception as exc:
+            log("WARN", f"Failed stripping {shared_lib}: {exc}")
 
 
 def create_layer_zip(layer_dir: Path) -> Path:
