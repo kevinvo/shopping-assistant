@@ -9,7 +9,7 @@ import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 import zipfile
 
 import boto3
@@ -41,38 +41,68 @@ def prune_layer_contents(layer_dir: Path) -> None:
     if not python_root.exists():
         raise PublishError(f"Expected python directory at {python_root}")
 
-    pruning_targets: list[tuple[str, str]] = [
+    pruning_targets: List[Tuple[str, str, bool]] = [
         (
             "torch",
             "PyTorch not required for SemanticChunker when using external embeddings.",
+            False,
         ),
-        ("torch-*.dist-info", "Remove PyTorch metadata."),
+        ("torch-*.dist-info", "Remove PyTorch metadata.", False),
         (
             "torchvision",
             "Torchvision pulled in by torch wheel but unused in Lambda layer.",
+            False,
         ),
-        ("torchvision-*.dist-info", "Remove Torchvision metadata."),
+        ("torchvision-*.dist-info", "Remove Torchvision metadata.", False),
         (
             "transformers",
             "SemanticChunker does not rely on HuggingFace transformers in this stack.",
+            False,
         ),
-        ("transformers-*.dist-info", "Remove transformers metadata."),
+        ("transformers-*.dist-info", "Remove transformers metadata.", False),
         (
             "sentence_transformers",
             "Relying on remote embeddings, so sentence_transformers can be dropped.",
+            False,
         ),
-        ("sentence_transformers-*.dist-info", "Remove sentence-transformers metadata."),
+        (
+            "sentence_transformers-*.dist-info",
+            "Remove sentence-transformers metadata.",
+            False,
+        ),
         (
             "diffusers",
             "Large diffusion library is unused.",
+            False,
         ),
-        ("diffusers-*.dist-info", "Remove diffusers metadata."),
+        ("diffusers-*.dist-info", "Remove diffusers metadata.", False),
         (
             "numpy/random/_examples",
             "Example assets not required at runtime.",
+            False,
         ),
-        ("langchain*/**/tests", "Strip LangChain test suites."),
-        ("langchain*/**/__pycache__", "Prune pycache directories."),
+        ("langchain*/**/tests", "Strip LangChain test suites.", True),
+        ("langchain*/**/__pycache__", "Prune pycache directories.", True),
+        (
+            "grpc_tools",
+            "gRPC tooling is only needed for code generation, not Lambda runtime.",
+            False,
+        ),
+        ("grpc_tools-*.dist-info", "Remove grpc_tools metadata.", False),
+        (
+            "zstandard",
+            "Zstandard compression bindings are unused and add ~20MB.",
+            False,
+        ),
+        ("zstandard-*.dist-info", "Remove zstandard metadata.", False),
+        (
+            "pandas/tests",
+            "Drop pandas test data to save space.",
+            True,
+        ),
+        ("numpy/tests", "Drop NumPy test suites.", True),
+        ("numpy/**/tests", "Drop nested NumPy tests.", True),
+        ("numpy/**/__pycache__", "Drop NumPy pycache directories.", True),
     ]
 
     removed_items: list[str] = []
@@ -89,8 +119,11 @@ def prune_layer_contents(layer_dir: Path) -> None:
             except Exception as exc:
                 log("WARN", f"Failed pruning {item}: {exc}")
 
-    for pattern, reason in pruning_targets:
-        matched = list(python_root.glob(pattern))
+    for pattern, reason, recursive in pruning_targets:
+        if recursive:
+            matched = list(python_root.rglob(pattern))
+        else:
+            matched = list(python_root.glob(pattern))
         if matched:
             log("INFO", f"Pruning {pattern}: {reason}")
             _remove_paths(matched)
@@ -123,7 +156,7 @@ def ensure_bucket_exists(s3_client, bucket: str, region: str) -> None:
                 f"Failed checking bucket {bucket}: {exc.response.get('Error', {}).get('Message', exc)}"
             ) from exc
         log("INFO", f"Creating S3 bucket {bucket}")
-        params = {"Bucket": bucket}
+        params: Dict[str, Any] = {"Bucket": bucket}
         if region != "us-east-1":
             params["CreateBucketConfiguration"] = {"LocationConstraint": region}
         s3_client.create_bucket(**params)
