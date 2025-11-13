@@ -92,12 +92,6 @@ def prune_layer_contents(layer_dir: Path) -> None:
         ),
         ("grpc_tools-*.dist-info", "Remove grpc_tools metadata.", False),
         (
-            "zstandard",
-            "Zstandard compression bindings are unused and add ~20MB.",
-            False,
-        ),
-        ("zstandard-*.dist-info", "Remove zstandard metadata.", False),
-        (
             "pandas/tests",
             "Drop pandas test data to save space.",
             True,
@@ -146,7 +140,6 @@ def prune_layer_contents(layer_dir: Path) -> None:
 
     critical_paths = [
         "pandas",
-        "zstandard",
         "grpc",
         "sqlalchemy",
         "torch",
