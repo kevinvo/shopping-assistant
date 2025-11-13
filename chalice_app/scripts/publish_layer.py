@@ -9,7 +9,7 @@ import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Iterable, Optional
 import zipfile
 
 import boto3
@@ -34,6 +34,71 @@ def ensure_layer_contents(layer_dir: Path) -> None:
         raise PublishError(
             "Layer contents missing. Run 'bash scripts/build-layer.sh' before publishing."
         )
+
+
+def prune_layer_contents(layer_dir: Path) -> None:
+    python_root = layer_dir / "python"
+    if not python_root.exists():
+        raise PublishError(f"Expected python directory at {python_root}")
+
+    pruning_targets: list[tuple[str, str]] = [
+        (
+            "torch",
+            "PyTorch not required for SemanticChunker when using external embeddings.",
+        ),
+        ("torch-*.dist-info", "Remove PyTorch metadata."),
+        (
+            "torchvision",
+            "Torchvision pulled in by torch wheel but unused in Lambda layer.",
+        ),
+        ("torchvision-*.dist-info", "Remove Torchvision metadata."),
+        (
+            "transformers",
+            "SemanticChunker does not rely on HuggingFace transformers in this stack.",
+        ),
+        ("transformers-*.dist-info", "Remove transformers metadata."),
+        (
+            "sentence_transformers",
+            "Relying on remote embeddings, so sentence_transformers can be dropped.",
+        ),
+        ("sentence_transformers-*.dist-info", "Remove sentence-transformers metadata."),
+        (
+            "diffusers",
+            "Large diffusion library is unused.",
+        ),
+        ("diffusers-*.dist-info", "Remove diffusers metadata."),
+        (
+            "numpy/random/_examples",
+            "Example assets not required at runtime.",
+        ),
+        ("langchain*/**/tests", "Strip LangChain test suites."),
+        ("langchain*/**/__pycache__", "Prune pycache directories."),
+    ]
+
+    removed_items: list[str] = []
+
+    def _remove_paths(paths: Iterable[Path]) -> None:
+        nonlocal removed_items
+        for item in paths:
+            try:
+                if item.is_dir():
+                    shutil.rmtree(item, ignore_errors=True)
+                else:
+                    item.unlink(missing_ok=True)
+                removed_items.append(str(item.relative_to(python_root)))
+            except Exception as exc:
+                log("WARN", f"Failed pruning {item}: {exc}")
+
+    for pattern, reason in pruning_targets:
+        matched = list(python_root.glob(pattern))
+        if matched:
+            log("INFO", f"Pruning {pattern}: {reason}")
+            _remove_paths(matched)
+
+    if removed_items:
+        log("INFO", f"Pruned {len(removed_items)} items from layer.")
+    else:
+        log("INFO", "No optional dependencies were pruned.")
 
 
 def create_layer_zip(layer_dir: Path) -> Path:
@@ -83,6 +148,7 @@ def publish_layer(
     bucket: Optional[str] = None,
 ) -> str:
     ensure_layer_contents(layer_dir)
+    prune_layer_contents(layer_dir)
     zip_path = create_layer_zip(layer_dir)
     zip_size = zip_path.stat().st_size
     log("INFO", f"Layer zip path: {zip_path} ({zip_size} bytes)")
