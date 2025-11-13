@@ -46,7 +46,7 @@ def prune_layer_contents(layer_dir: Path) -> None:
     pruning_targets: List[Tuple[str, str, bool]] = [
         (
             "torch",
-            "PyTorch not required for SemanticChunker when using external embeddings.",
+            "PyTorch not required; embeddings generated via external services.",
             False,
         ),
         ("torch-*.dist-info", "Remove PyTorch metadata.", False),
@@ -58,7 +58,7 @@ def prune_layer_contents(layer_dir: Path) -> None:
         ("torchvision-*.dist-info", "Remove Torchvision metadata.", False),
         (
             "transformers",
-            "SemanticChunker does not rely on HuggingFace transformers in this stack.",
+            "HuggingFace transformers not needed for Lambda runtime.",
             False,
         ),
         ("transformers-*.dist-info", "Remove transformers metadata.", False),
