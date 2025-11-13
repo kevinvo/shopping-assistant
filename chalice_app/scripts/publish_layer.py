@@ -299,7 +299,7 @@ def publish_layer(
             response = lambda_client.publish_layer_version(
                 LayerName=layer_name,
                 Description="Dependencies for shopping-assistant Chalice app",
-                ZipFile=zip_path.read_bytes(),
+                Content={"ZipFile": zip_path.read_bytes()},
                 CompatibleRuntimes=["python3.12"],
             )
     except ClientError as exc:
