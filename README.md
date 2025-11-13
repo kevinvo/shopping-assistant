@@ -91,6 +91,11 @@ The application is built on AWS using a serverless architecture with the followi
    - LLM integration, reranking, and LangSmith logging
    - Session and connection management
 
+#### Semantic Chunking
+
+- The Reddit indexer now uses [semchunk](https://pypi.org/project/semchunk/) plus `tiktoken` for semantic-aware splits without the heavy torch/transformers stack.
+- Ensure the Chalice Lambda layer includes `semchunk` and `tiktoken` (both listed in `requirements.txt`); if the dependency is missing at runtime the code falls back to the recursive splitter and logs a warning.
+
 4. **Glue Jobs** (`glue_jobs/`): Batch data processing
    - Reddit data transformation
    - Top posts processing

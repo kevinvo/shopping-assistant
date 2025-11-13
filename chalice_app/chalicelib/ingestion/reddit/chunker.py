@@ -1,11 +1,20 @@
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from chalicelib.models.data_objects import RedditPost
-from typing import List, Optional
-from langchain.schema import Document
+from __future__ import annotations
+
 from dataclasses import dataclass, asdict
+from typing import Callable, List, Optional
+
+from langchain.schema import Document
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+
 from chalicelib.core.logger_config import setup_logger
+from chalicelib.models.data_objects import RedditPost
 
 logger = setup_logger(__name__)
+
+try:  # pragma: no cover - optional dependency
+    from semchunk import chunkerify as _semchunk_chunkerify
+except ImportError:  # pragma: no cover - optional dependency
+    _semchunk_chunkerify = None
 
 
 @dataclass
@@ -22,14 +31,40 @@ class Metadata:
 
 
 class RedditChunker:
-    def __init__(self, chunk_size=1_000, chunk_overlap=200):
+    def __init__(
+        self,
+        chunk_size: int = 1_000,
+        chunk_overlap: int = 200,
+        *,
+        semantic_chunk_size_tokens: Optional[int] = None,
+        semantic_overlap_tokens: Optional[int] = None,
+        semantic_tokenizer: str = "cl100k_base",
+        semantic_chunker: Optional[Callable[[str], List[str]]] = None,
+    ):
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=chunk_size, chunk_overlap=chunk_overlap
         )
+        if semantic_chunker is not None:
+            self._semantic_chunker: Optional[Callable[[str], List[str]]] = (
+                semantic_chunker
+            )
+        else:
+            self._semantic_chunker = _build_semchunk_chunker(
+                chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap,
+                semantic_chunk_size_tokens=semantic_chunk_size_tokens,
+                semantic_overlap_tokens=semantic_overlap_tokens,
+                semantic_tokenizer=semantic_tokenizer,
+            )
+
+        if self._semantic_chunker is None:
+            logger.warning(
+                "semchunk not available; falling back to RecursiveCharacterTextSplitter."
+            )
 
     def chunk_reddit_post(self, post: RedditPost) -> List[Document]:
         full_text = f"Title: {post.title}\n\n{post.content}"
-        chunks = self.text_splitter.split_text(full_text)
+        chunks = self._chunk_text(full_text)
 
         # Process comments separately
         documents: List[Document] = []
@@ -57,7 +92,7 @@ class RedditChunker:
             )
 
         for comment in post.comments:
-            comment_chunks = self.text_splitter.split_text(comment.body)
+            comment_chunks = self._chunk_text(comment.body)
             for chunk_id, chunk in enumerate(comment_chunks):
                 documents.append(
                     Document(
@@ -88,7 +123,7 @@ class RedditChunker:
                 continue
 
             # Split comment into chunks if needed
-            chunks = self.text_splitter.split_text(comment.body)
+            chunks = self._chunk_text(comment.body)
 
             for chunk_id, chunk in enumerate(chunks):
                 # Add a timestamp marker directly in the document content
@@ -116,3 +151,63 @@ class RedditChunker:
                 )
 
         return documents
+
+    def _chunk_text(self, text: str) -> List[str]:
+        if not text:
+            return []
+
+        if self._semantic_chunker is not None:
+            try:
+                chunks = self._semantic_chunker(text)
+                if chunks:
+                    return list(chunks)
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.warning(
+                    "Semantic chunker failed (%s); falling back to recursive splitter.",
+                    exc,
+                )
+                self._semantic_chunker = None
+
+        return self.text_splitter.split_text(text)
+
+
+def _build_semchunk_chunker(
+    *,
+    chunk_size: int,
+    chunk_overlap: int,
+    semantic_chunk_size_tokens: Optional[int],
+    semantic_overlap_tokens: Optional[int],
+    semantic_tokenizer: str,
+) -> Optional[Callable[[str], List[str]]]:
+    if _semchunk_chunkerify is None:  # pragma: no cover - optional dependency
+        return None
+
+    token_chunk_size = semantic_chunk_size_tokens or max(1, round(chunk_size / 4))
+    if token_chunk_size <= 0:
+        token_chunk_size = 1
+
+    if semantic_overlap_tokens is not None:
+        overlap_tokens = min(max(semantic_overlap_tokens, 0), token_chunk_size - 1)
+    else:
+        overlap_ratio = 0.0
+        if chunk_size > 0:
+            overlap_ratio = max(0.0, min(1.0, chunk_overlap / chunk_size))
+        overlap_tokens = int(round(token_chunk_size * overlap_ratio))
+        overlap_tokens = min(overlap_tokens, max(token_chunk_size - 1, 0))
+
+    try:
+        chunker = _semchunk_chunkerify(
+            semantic_tokenizer,
+            chunk_size=token_chunk_size,
+            memoize=True,
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.warning("Unable to initialize semchunk chunker: %s", exc)
+        return None
+
+    def _chunk(text: str) -> List[str]:
+        overlap = overlap_tokens if overlap_tokens > 0 else None
+        result = chunker(text, overlap=overlap)
+        return list(result)
+
+    return _chunk
