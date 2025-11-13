@@ -109,6 +109,8 @@ def prune_layer_contents(layer_dir: Path) -> None:
         ("numpy/**/__pycache__", "Drop NumPy pycache directories.", True),
         ("grpc", "gRPC runtime not used by Chalice Lambdas.", False),
         ("grpc-*.dist-info", "Remove gRPC metadata.", False),
+        ("sqlalchemy", "SQLAlchemy not used by Chalice Lambdas.", False),
+        ("SQLAlchemy-*.dist-info", "Remove SQLAlchemy metadata.", False),
     ]
 
     removed_items: list[str] = []
