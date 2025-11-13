@@ -83,8 +83,6 @@ def prune_layer_contents(layer_dir: Path) -> None:
             "Example assets not required at runtime.",
             False,
         ),
-        ("langchain*/**/tests", "Strip LangChain test suites.", True),
-        ("langchain*/**/__pycache__", "Prune pycache directories.", True),
         (
             "pandas/tests",
             "Drop pandas test data to save space.",
