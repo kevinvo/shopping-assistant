@@ -111,3 +111,4 @@ site/
 logs/
 
 .coverage
+layer_inspect

@@ -144,6 +144,21 @@ def prune_layer_contents(layer_dir: Path) -> None:
     _prune_numpy_shared_libs(python_root)
     _strip_shared_objects(python_root)
 
+    critical_paths = [
+        "pandas",
+        "zstandard",
+        "grpc",
+        "sqlalchemy",
+        "torch",
+        "transformers",
+    ]
+    for critical in critical_paths:
+        if (python_root / critical).exists():
+            raise PublishError(
+                f"Expected optional dependency '{critical}' to be removed but it is still present. "
+                "Ensure the layer build copied files with user-write permissions."
+            )
+
 
 def _prune_numpy_shared_libs(python_root: Path) -> None:
     numpy_libs_dir = python_root / "numpy.libs"

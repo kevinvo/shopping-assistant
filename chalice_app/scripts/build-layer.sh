@@ -6,6 +6,8 @@ set -e  # Exit on error
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHALICE_APP_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROJECT_ROOT="$(cd "$CHALICE_APP_DIR/.." && pwd)"
+HOST_UID=$(id -u)
+HOST_GID=$(id -g)
 
 cd "$PROJECT_ROOT"
 
@@ -26,10 +28,14 @@ docker buildx build --platform linux/amd64 -t lambda-layer:latest -f Dockerfile 
 
 echo "Running container to copy dependencies..."
 docker run --rm --platform linux/amd64 \
+    -u "${HOST_UID}:${HOST_GID}" \
     -v "$CHALICE_APP_DIR/layer/python:/output" \
     --entrypoint sh \
     lambda-layer:latest \
     -c "cp -r /lambda-layer/python/. /output/" > /dev/null
+
+# Ensure ownership and permissions are writable by the invoking user
+chmod -R u+rwX "$CHALICE_APP_DIR/layer/python"
 
 echo "Verifying layer contents..."
 if [ ! "$(ls -A $CHALICE_APP_DIR/layer/python)" ]; then

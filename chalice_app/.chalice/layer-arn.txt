@@ -1,1 +1,1 @@
-arn:aws:lambda:ap-southeast-1:979920756619:layer:shopping-assistant-chalice-layer:142
+arn:aws:lambda:ap-southeast-1:979920756619:layer:shopping-assistant-chalice-layer:143
