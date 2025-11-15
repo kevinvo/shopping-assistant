@@ -23,15 +23,9 @@ sqs_client = boto3.client("sqs")
 
 
 def is_keep_warm_connection(event) -> bool:
-    if hasattr(event, "_event_dict"):
-        event_dict = event._event_dict
-        if isinstance(event_dict, dict):
-            if "requestContext" in event_dict:
-                query_params = event_dict["requestContext"].get("queryStringParameters")
-                if query_params and isinstance(query_params, dict):
-                    return query_params.get("keep-warm") == "1"
-
-    return False
+    event_dict = event._event_dict
+    query_params = event_dict.get("requestContext", {}).get("queryStringParameters")
+    return query_params and query_params.get("keep-warm") == "1"
 
 
 def handle_websocket_connect(
