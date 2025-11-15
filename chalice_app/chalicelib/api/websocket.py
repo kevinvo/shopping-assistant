@@ -23,23 +23,13 @@ sqs_client = boto3.client("sqs")
 
 
 def is_keep_warm_connection(event) -> bool:
-    if hasattr(event, "queryStringParameters") and event.queryStringParameters:
-        if isinstance(event.queryStringParameters, dict):
-            return event.queryStringParameters.get("keep-warm") == "1"
-
-    if hasattr(event, "raw_event"):
-        raw = event.raw_event
-        if isinstance(raw, dict) and "requestContext" in raw:
-            query_params = raw["requestContext"].get("queryStringParameters")
-            if query_params and isinstance(query_params, dict):
-                return query_params.get("keep-warm") == "1"
-
     if hasattr(event, "_event_dict"):
         event_dict = event._event_dict
-        if isinstance(event_dict, dict) and "requestContext" in event_dict:
-            query_params = event_dict["requestContext"].get("queryStringParameters")
-            if query_params and isinstance(query_params, dict):
-                return query_params.get("keep-warm") == "1"
+        if isinstance(event_dict, dict):
+            if "requestContext" in event_dict:
+                query_params = event_dict["requestContext"].get("queryStringParameters")
+                if query_params and isinstance(query_params, dict):
+                    return query_params.get("keep-warm") == "1"
 
     return False
 
