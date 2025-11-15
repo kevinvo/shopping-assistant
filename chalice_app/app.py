@@ -84,18 +84,9 @@ def websocket_connect(event):
         if not stage:
             stage = event.context.get("stage") if hasattr(event, "context") else None
 
-        is_keep_warm = False
-        if hasattr(event, "queryStringParameters") and event.queryStringParameters:
-            is_keep_warm = event.queryStringParameters.get("keep-warm") == "1"
-        if not is_keep_warm and hasattr(event, "requestContext"):
-            request_context = event.requestContext
-            if (
-                hasattr(request_context, "queryStringParameters")
-                and request_context.queryStringParameters
-            ):
-                is_keep_warm = (
-                    request_context.queryStringParameters.get("keep-warm") == "1"
-                )
+        from chalicelib.api.websocket import is_keep_warm_connection
+
+        is_keep_warm = is_keep_warm_connection(event)
 
         if is_keep_warm:
             handle_websocket_connect(
