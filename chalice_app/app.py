@@ -330,10 +330,10 @@ def layer_cleanup(event):
         raise
 
 
-@app.schedule(Rate(5, unit=Rate.MINUTES))
+@app.schedule(Rate(3, unit=Rate.MINUTES))
 @notify_on_exception
 def keep_websocket_warm(event):
-    """Ping WebSocket connect endpoint every 5 minutes to keep container warm."""
+    """Ping WebSocket connect endpoint every 3 minutes to keep container warm."""
     import asyncio
 
     try:
