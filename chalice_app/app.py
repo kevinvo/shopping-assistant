@@ -73,7 +73,39 @@ def websocket_connect(event):
     """Handle WebSocket connection"""
     try:
         connection_id = event.connection_id
-        handle_websocket_connect(connection_id)
+
+        domain_name = getattr(event, "domain_name", None)
+        stage = getattr(event, "stage", None)
+
+        if not domain_name:
+            domain_name = (
+                event.context.get("domainName") if hasattr(event, "context") else None
+            )
+        if not stage:
+            stage = event.context.get("stage") if hasattr(event, "context") else None
+
+        is_keep_warm = False
+        if hasattr(event, "queryStringParameters") and event.queryStringParameters:
+            is_keep_warm = event.queryStringParameters.get("keep-warm") == "1"
+        if not is_keep_warm and hasattr(event, "requestContext"):
+            request_context = event.requestContext
+            if (
+                hasattr(request_context, "queryStringParameters")
+                and request_context.queryStringParameters
+            ):
+                is_keep_warm = (
+                    request_context.queryStringParameters.get("keep-warm") == "1"
+                )
+
+        if is_keep_warm:
+            handle_websocket_connect(
+                connection_id=connection_id,
+                skip_db_write=True,
+                domain_name=domain_name,
+                stage=stage,
+            )
+        else:
+            handle_websocket_connect(connection_id=connection_id)
     except Exception as e:
         logger.error(f"Error in websocket_connect: {str(e)}", exc_info=True)
 
@@ -305,3 +337,49 @@ def layer_cleanup(event):
     except Exception as exc:
         logger.error(f"Error in layer_artifacts_cleanup: {exc}", exc_info=True)
         raise
+
+
+@app.schedule(Rate(5, unit=Rate.MINUTES))
+@notify_on_exception
+def keep_websocket_warm(event):
+    """Ping WebSocket connect endpoint every 5 minutes to keep container warm."""
+    import asyncio
+
+    try:
+        websocket_domain = os.environ.get("WEBSOCKET_DOMAIN")
+        websocket_stage = os.environ.get("WEBSOCKET_STAGE")
+
+        if not websocket_domain or not websocket_stage:
+            logger.warning(
+                "WEBSOCKET_DOMAIN or WEBSOCKET_STAGE not set, skipping keep-warm ping"
+            )
+            return
+
+        websocket_url = f"wss://{websocket_domain}/{websocket_stage}/?keep-warm=1"
+
+        async def connect_and_wait():
+            try:
+                import websockets
+
+                logger.info(
+                    f"Making keep-warm WebSocket connection to: {websocket_url}"
+                )
+                async with websockets.connect(websocket_url) as websocket:
+                    logger.info("Keep-warm WebSocket connection established")
+                    try:
+                        response = await asyncio.wait_for(websocket.recv(), timeout=2.0)
+                        logger.info(f"Received keep-warm response: {response}")
+                    except asyncio.TimeoutError:
+                        logger.warning(
+                            "No response received within timeout, but connection was established"
+                        )
+                    await asyncio.sleep(1)
+                    logger.info("Keep-warm WebSocket connection completed")
+            except Exception as e:
+                logger.warning(f"Keep-warm WebSocket connection failed: {e}")
+
+        asyncio.run(connect_and_wait())
+        logger.info("WebSocket keep-warm ping successful")
+
+    except Exception as e:
+        logger.warning(f"WebSocket keep-warm ping error: {e}")

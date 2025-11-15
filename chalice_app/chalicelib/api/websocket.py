@@ -22,11 +22,41 @@ logger.setLevel(logging.INFO)
 sqs_client = boto3.client("sqs")
 
 
-def handle_websocket_connect(connection_id: str) -> None:
+def handle_websocket_connect(
+    connection_id: str,
+    skip_db_write: bool = False,
+    domain_name: Optional[str] = None,
+    stage: Optional[str] = None,
+) -> None:
     """Handle WebSocket connection logic."""
-    from chalicelib.aws.dynamo.tables import ConnectionInfo
-
     logger.info("WebSocket connect event for connection: %s", connection_id)
+
+    if skip_db_write:
+        logger.info(
+            "Keep-warm ping detected, skipping DynamoDB write for connection: %s",
+            connection_id,
+        )
+
+        if domain_name and stage:
+            try:
+                _send_websocket_message(
+                    connection_id, domain_name, stage, {"type": "pong"}
+                )
+                logger.info(
+                    "Sent pong response to keep-warm ping for connection: %s",
+                    connection_id,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to send pong response to keep-warm ping: %s", exc
+                )
+        else:
+            logger.warning(
+                "Keep-warm ping detected but domain_name/stage not provided, cannot send pong"
+            )
+        return
+
+    from chalicelib.aws.dynamo.tables import ConnectionInfo
 
     session_id = str(uuid.uuid4())
     logger.info("Generated session ID: %s", session_id)
