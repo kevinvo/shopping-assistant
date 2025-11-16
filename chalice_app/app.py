@@ -52,7 +52,7 @@ mark_init_end()
 @measure_cold_start(handler_name="scraper_worker")
 @notify_on_exception
 def scraper_worker(event, context):
-    """Execute the daily Reddit scraper. Intended for Step Functions invocation."""
+    """Scraper Executor (Lambda): execute the daily Reddit scraper."""
     try:
         logger.info("Scraper worker invoked", extra={"event": event})
         from chalicelib.jobs.scraper import run_daily_scraper
@@ -214,9 +214,7 @@ def evaluator(event):
 @app.schedule(Cron(0, 2, "*", "*", "?", "*"))
 @notify_on_exception
 def scraper(event):
-    """
-    Daily Reddit scraper - runs at 2:00 AM UTC
-    """
+    """Scraper Trigger (Step Functions): runs at 2:00 AM UTC and launches the workflow."""
     try:
         if not SCRAPER_STATE_MACHINE_ARN:
             raise RuntimeError(
@@ -227,7 +225,7 @@ def scraper(event):
             "%Y%m%dT%H%M%S%f"
         )
         logger.info(
-            "Starting scraper Step Functions execution",
+            "Scraper Trigger: starting Step Functions execution",
             extra={
                 "state_machine_arn": SCRAPER_STATE_MACHINE_ARN,
                 "execution_name": execution_name,
@@ -241,7 +239,7 @@ def scraper(event):
         )
 
         logger.info(
-            "Scraper Step Function started",
+            "Scraper Trigger: Step Functions started",
             extra={"executionArn": response.get("executionArn")},
         )
 

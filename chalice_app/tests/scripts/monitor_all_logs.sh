@@ -59,8 +59,8 @@ if [[ ${#SELECTORS[@]} -eq 0 ]]; then
   echo "  3) WebSocket Disconnect"
   echo "  4) Chat Processor"
   echo "  5) Indexer"
-  echo "  6) Scraper (scheduler)"
-  echo "  7) Scraper Worker"
+  echo "  6) Scraper Trigger (Step Functions)"
+  echo "  7) Scraper Worker (Lambda)"
   echo "  8) Glue Starter"
   echo "  9) Layer Cleanup"
   echo " 10) Keep WebSocket Warm"
@@ -252,7 +252,7 @@ if [ "$MODE" == "follow" ]; then
       *chat_processor) prefix="[CHAT-PROC] " ;;
       *indexer) prefix="[INDEXER] " ;;
       *scraper_worker) prefix="[SCRAPER-WORKER] " ;;
-      *scraper) prefix="[SCRAPER] " ;;
+      *scraper) prefix="[SCRAPER-TRIGGER] " ;;
       *glue_starter) prefix="[GLUE] " ;;
       *layer_cleanup) prefix="[LAYER] " ;;
       *keep_websocket_warm) prefix="[KEEP-WARM] " ;;
@@ -272,8 +272,8 @@ else
       *websocket_disconnect) echo "=== WEBSOCKET DISCONNECT HANDLER ===" ;;
       *chat_processor) echo "=== CHAT PROCESSOR HANDLER ===" ;;
       *indexer) echo "=== INDEXER HANDLER ===" ;;
-      *scraper) echo "=== SCRAPER HANDLER ===" ;;
-      *scraper_worker) echo "=== SCRAPER WORKER HANDLER ===" ;;
+      *scraper) echo "=== SCRAPER TRIGGER (STEP FUNCTIONS) ===" ;;
+      *scraper_worker) echo "=== SCRAPER WORKER (LAMBDA) ===" ;;
       *glue_starter) echo "=== GLUE STARTER HANDLER ===" ;;
       *layer_cleanup) echo "=== LAYER CLEANUP HANDLER ===" ;;
       *keep_websocket_warm) echo "=== KEEP WEBSOCKET WARM HANDLER ===" ;;
