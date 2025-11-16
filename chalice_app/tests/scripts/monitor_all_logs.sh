@@ -53,7 +53,7 @@ fi
 # If no selectors provided, prompt user interactively
 if [[ ${#SELECTORS[@]} -eq 0 ]]; then
   echo ""
-  echo "Select which functions to tail (comma-separated numbers):"
+  echo "Select which functions to tail (you can enter multiple, e.g. '4,5,7' or type '11' for all):"
   echo "  1) WebSocket Connect"
   echo "  2) WebSocket Message"
   echo "  3) WebSocket Disconnect"
