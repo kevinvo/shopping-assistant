@@ -9,6 +9,9 @@
 #     targets       Optional list of which logs to include. Supported aliases:
 #                     connect, message, disconnect, chat, indexer, scraper, scraper_worker, glue_starter, layer_cleanup, keep_warm
 #                   Or pass full log group names to tail directly.
+# Environment:
+#   SCRAPER_STATE_MACHINE_ARN  (optional) State Machine ARN to analyze Step Functions timeouts for Scraper Trigger
+#
 # Examples:
 #   ./monitor_all_logs.sh follow
 #   ./monitor_all_logs.sh recent 15m connect message
@@ -342,6 +345,30 @@ elif [ "$MODE" == "analyze" ]; then
           echo "  Note: Step Functions retries on timeout (up to 3 attempts) — expect up to 3 START lines per timed-out run."
           ;;
       esac
+    fi
+    # If this is the Scraper Trigger, optionally include Step Functions timeout counts when ARN is provided
+    if [[ "$lg" == *scraper && -n "$SCRAPER_STATE_MACHINE_ARN" ]]; then
+      # Attempt to count TIMED_OUT executions in the last 24h (best-effort, limited by --max-results)
+      # Compute ISO start time 24h ago (UTC) in a portable way via Python if available
+      if command -v python3 >/dev/null 2>&1; then
+        START_ISO=$(python3 - <<'PY'
+import datetime, sys
+print((datetime.datetime.utcnow() - datetime.timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ"))
+PY
+)
+      else
+        # Fallback: leave empty to not filter by time
+        START_ISO=""
+      fi
+      # Fetch TIMED_OUT executions
+      if [[ -n "$START_ISO" ]]; then
+        sf_count=$(aws stepfunctions list-executions --state-machine-arn "$SCRAPER_STATE_MACHINE_ARN" --status-filter TIMED_OUT --max-results 100 --query "length(executions[?startDate>=\`$START_ISO\`])" --output text 2>/dev/null || echo "N/A")
+      else
+        sf_count=$(aws stepfunctions list-executions --state-machine-arn "$SCRAPER_STATE_MACHINE_ARN" --status-filter TIMED_OUT --max-results 100 --query "length(executions)" --output text 2>/dev/null || echo "N/A")
+      fi
+      echo "  Step Functions TIMED_OUT executions (last 24h): $sf_count"
+    elif [[ "$lg" == *scraper && -z "$SCRAPER_STATE_MACHINE_ARN" ]]; then
+      echo "  Tip: set SCRAPER_STATE_MACHINE_ARN to also report Step Functions timeout counts."
     fi
     rm -f "$tmpfile"
     echo ""
