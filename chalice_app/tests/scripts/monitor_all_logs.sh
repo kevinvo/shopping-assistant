@@ -1,20 +1,26 @@
 #!/bin/bash
 # Monitor Lambda logs
 # Usage:
-#   ./monitor_all_logs.sh [follow|recent] [time_window] [targets...]
-#     follow       Follow logs in real-time
-#     recent       Show recent logs (default window 5m, override with time_window like 1h/30m/5m)
-#     time_window  Optional for 'recent' (default: 5m). Ignored for 'follow'
-#     targets      Optional list of which logs to include. Supported aliases:
-#                    connect, message, disconnect, chat
-#                  You can also pass full log group names to tail directly.
+#   ./monitor_all_logs.sh [follow|recent|analyze] [time_window] [targets...]
+#     follow        Follow logs in real-time (shows last 15m snapshot first; 24h for daily jobs)
+#     recent        Print recent logs once (default 5m; pass 15m/1h/24h/etc.)
+#     analyze       Print counts (invocations/timeouts/errors) over a window (default 24h for daily jobs, else 15m)
+#     time_window   Optional for 'recent' and 'analyze'; if omitted, defaults apply as above.
+#     targets       Optional list of which logs to include. Supported aliases:
+#                     connect, message, disconnect, chat, indexer, scraper, scraper_worker, glue_starter, layer_cleanup, keep_warm
+#                   Or pass full log group names to tail directly.
 # Examples:
 #   ./monitor_all_logs.sh follow
 #   ./monitor_all_logs.sh recent 15m connect message
+#   ./monitor_all_logs.sh analyze 24h indexer scraper_worker
 #   ./monitor_all_logs.sh follow /aws/lambda/shopping-assistant-api-chalice-test-websocket_connect
 
 MODE=${1:-follow}
 TIME_WINDOW=${2:-5m}
+# For analyze mode, prefer a longer default window
+if [[ "$MODE" == "analyze" && "$TIME_WINDOW" == "5m" ]]; then
+  TIME_WINDOW="24h"
+fi
 REGION="ap-southeast-1"
 
 # WebSocket handler Lambda functions
@@ -65,6 +71,7 @@ if [[ ${#SELECTORS[@]} -eq 0 ]]; then
   echo "  9) Layer Cleanup"
   echo " 10) Keep WebSocket Warm"
   echo " 11) All of the above"
+  echo " 12) Analyze: Scraper Trigger + Scraper Worker (24h)"
   echo ""
   read -r -p "Enter choice(s): " CHOICES
   if [[ -z "$CHOICES" ]]; then
@@ -86,6 +93,7 @@ if [[ ${#SELECTORS[@]} -eq 0 ]]; then
         9) SELECTORS+=("layer_cleanup") ;;
         10) SELECTORS+=("keep_warm") ;;
         11) SELECTORS+=("all") ;;
+        12) SELECTORS+=("ANALYZE_SCRAPER_BUNDLE") ;;
         *) 
           # also allow entering full log groups directly
           if [[ "$num" == /aws/lambda/* ]]; then
@@ -98,6 +106,19 @@ if [[ ${#SELECTORS[@]} -eq 0 ]]; then
     done
   fi
 fi
+
+# Special option: analyze bundle for scraper trigger + worker
+for s in "${SELECTORS[@]}"; do
+  if [[ "$s" == "ANALYZE_SCRAPER_BUNDLE" ]]; then
+    MODE="analyze"
+    # Default to 24h if user didn't provide explicit window param
+    if [[ -z "$2" ]]; then
+      TIME_WINDOW="24h"
+    fi
+    SELECTORS=("scraper" "scraper_worker")
+    break
+  fi
+done
 
 # Map a selector to a log group (supports aliases and full names)
 map_target_to_log_group() {
@@ -196,6 +217,9 @@ follow_log_group() {
     *indexer|*scraper|*scraper_worker|*glue_starter)
       snapshot_window="24h"
       ;;
+    *layer_cleanup)
+      snapshot_window="14d"
+      ;;
   esac
   # Show a recent window first to confirm activity
   aws logs tail "$log_group" --since "$snapshot_window" --region "$REGION" --format short 2>&1 | sed "s/^/$prefix/"
@@ -236,6 +260,9 @@ if [ "$MODE" == "follow" ]; then
       *indexer|*scraper|*scraper_worker|*glue_starter)
         SNAPSHOT_WINDOW="24h"
         ;;
+      *layer_cleanup)
+        SNAPSHOT_WINDOW="14d"
+        ;;
     esac
     aws logs tail "$lg" --since "$SNAPSHOT_WINDOW" --region "$REGION" --format short
     aws logs tail "$lg" --follow --region "$REGION" --format short
@@ -262,6 +289,63 @@ if [ "$MODE" == "follow" ]; then
     
     # Wait for all background processes
     wait
+elif [ "$MODE" == "analyze" ]; then
+  echo "Analyzing logs for selected groups..."
+  echo ""
+  for lg in "${LOG_GROUPS[@]}"; do
+    # Determine label
+    label="$lg"
+    case "$lg" in
+      *websocket_connect)   label="WEBSOCKET CONNECT" ;;
+      *websocket_message)   label="WEBSOCKET MESSAGE" ;;
+      *websocket_disconnect) label="WEBSOCKET DISCONNECT" ;;
+      *chat_processor)      label="CHAT PROCESSOR" ;;
+      *indexer)             label="INDEXER (daily)" ;;
+      *scraper)             label="SCRAPER TRIGGER (Step Functions, daily)" ;;
+      *scraper_worker)      label="SCRAPER WORKER (Lambda, invoked by Step Functions)" ;;
+      *glue_starter)        label="GLUE STARTER (daily)" ;;
+      *layer_cleanup)       label="LAYER CLEANUP" ;;
+      *keep_websocket_warm) label="KEEP WEBSOCKET WARM" ;;
+    esac
+    # Determine window per group if user left default 24h/15m behavior
+    SNAPSHOT_WINDOW="$TIME_WINDOW"
+    if [[ -z "$2" ]]; then
+      # No explicit window passed; choose defaults: 24h for daily jobs, else 15m
+      case "$lg" in
+        *indexer|*scraper|*scraper_worker|*glue_starter) SNAPSHOT_WINDOW="24h" ;;
+        *layer_cleanup) SNAPSHOT_WINDOW="14d" ;;
+        *) SNAPSHOT_WINDOW="15m" ;;
+      esac
+    fi
+    echo "=== $label ==="
+    echo "Window: $SNAPSHOT_WINDOW"
+    tmpfile="$(mktemp)"
+    if ! aws logs tail "$lg" --since "$SNAPSHOT_WINDOW" --region "$REGION" --format short >"$tmpfile" 2>/dev/null; then
+      echo "  ❌ Unable to read logs (check permissions or log group)."
+      rm -f "$tmpfile"
+      echo ""
+      continue
+    fi
+    total_lines=$(wc -l < "$tmpfile" | tr -d ' ')
+    starts=$(grep -E -c "START[[:space:]]+RequestId" "$tmpfile" || true)
+    timeouts=$(grep -E -ci "Task timed out" "$tmpfile" || true)
+    errors=$(grep -E -ci "ERROR|Error|Exception" "$tmpfile" || true)
+    echo "  Lines: $total_lines"
+    echo "  Invocations (START): $starts"
+    echo "  Timeouts: $timeouts"
+    echo "  Error lines (ERROR/Exception): $errors"
+    if [[ "$starts" -gt 0 ]]; then
+      echo "  Recent invocation timestamps (UTC):"
+      grep -E "^[0-9]{4}-[0-9]{2}-[0-9]{2}T" "$tmpfile" | grep -E "START[[:space:]]+RequestId" | tail -5 | awk '{print $1}' | sed 's/T/ /' | sed 's/\\..*$//'
+      case "$lg" in
+        *scraper_worker)
+          echo "  Note: Step Functions retries on timeout (up to 3 attempts) — expect up to 3 START lines per timed-out run."
+          ;;
+      esac
+    fi
+    rm -f "$tmpfile"
+    echo ""
+  done
 else
     echo "Showing recent logs (last $TIME_WINDOW)..."
     echo ""
