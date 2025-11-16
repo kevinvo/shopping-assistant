@@ -194,7 +194,7 @@ follow_log_group() {
   local snapshot_window="15m"
   case "$log_group" in
     *indexer|*scraper|*scraper_worker|*glue_starter)
-      snapshot_window="48h"
+      snapshot_window="24h"
       ;;
   esac
   # Show a recent window first to confirm activity
@@ -234,7 +234,7 @@ if [ "$MODE" == "follow" ]; then
     SNAPSHOT_WINDOW="15m"
     case "$lg" in
       *indexer|*scraper|*scraper_worker|*glue_starter)
-        SNAPSHOT_WINDOW="48h"
+        SNAPSHOT_WINDOW="24h"
         ;;
     esac
     aws logs tail "$lg" --since "$SNAPSHOT_WINDOW" --region "$REGION" --format short
