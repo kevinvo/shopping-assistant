@@ -14,5 +14,14 @@ if [ $# -gt 0 ]; then
     shift
 fi
 
-exec python "${SCRIPT_DIR}/post_deploy_attach_layer.py" --stage "$STAGE" --region "$REGION" "$@"
+# If next arg looks like a bare layer name (not starting with --), map it to --layer-name
+LAYER_ARGS=()
+if [[ $# -gt 0 ]]; then
+  if [[ "$1" != --* ]]; then
+    LAYER_ARGS=(--layer-name "$1")
+    shift
+  fi
+fi
+
+exec python "${SCRIPT_DIR}/post_deploy_attach_layer.py" --stage "$STAGE" --region "$REGION" "${LAYER_ARGS[@]}" "$@"
 
