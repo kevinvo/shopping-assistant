@@ -190,8 +190,15 @@ tail_logs() {
 follow_log_group() {
   local log_group=$1
   local prefix=$2
+  # Decide snapshot window based on function type
+  local snapshot_window="15m"
+  case "$log_group" in
+    *indexer|*scraper|*scraper_worker|*glue_starter)
+      snapshot_window="48h"
+      ;;
+  esac
   # Show a recent window first to confirm activity
-  aws logs tail "$log_group" --since "15m" --region "$REGION" --format short 2>&1 | sed "s/^/$prefix/"
+  aws logs tail "$log_group" --since "$snapshot_window" --region "$REGION" --format short 2>&1 | sed "s/^/$prefix/"
   # Follow new logs; avoid stdbuf (problematic on macOS/Homebrew arch); use while-read for prefixing
   aws logs tail "$log_group" --follow --region "$REGION" --format short 2>&1 | while IFS= read -r line; do
     printf "%s%s\n" "$prefix" "$line"
@@ -223,7 +230,14 @@ if [ "$MODE" == "follow" ]; then
   if [[ ${#LOG_GROUPS[@]} -eq 1 ]]; then
     lg="${LOG_GROUPS[0]}"
     echo "[INFO] Using direct follow for: $lg"
-    aws logs tail "$lg" --since "15m" --region "$REGION" --format short
+    # Decide snapshot window for direct follow
+    SNAPSHOT_WINDOW="15m"
+    case "$lg" in
+      *indexer|*scraper|*scraper_worker|*glue_starter)
+        SNAPSHOT_WINDOW="48h"
+        ;;
+    esac
+    aws logs tail "$lg" --since "$SNAPSHOT_WINDOW" --region "$REGION" --format short
     aws logs tail "$lg" --follow --region "$REGION" --format short
     exit 0
   fi
