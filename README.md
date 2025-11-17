@@ -93,8 +93,7 @@ The application is built on AWS using a serverless architecture with the followi
 
 #### Semantic Chunking
 
-- The Reddit indexer now uses [semchunk](https://pypi.org/project/semchunk/) plus `tiktoken` for semantic-aware splits without the heavy torch/transformers stack.
-- Ensure the Chalice Lambda layer includes `semchunk` and `tiktoken` (both listed in `requirements.txt`); if the dependency is missing at runtime the code falls back to the recursive splitter and logs a warning.
+The Reddit indexer uses [semchunk](https://pypi.org/project/semchunk/) with `tiktoken` for semantic-aware text chunking, improving retrieval quality by preserving semantic boundaries. The implementation automatically falls back to `RecursiveCharacterTextSplitter` if `semchunk` is unavailable. Both `semchunk>=3.2.5` and `tiktoken>=0.7.0` are included in `requirements.txt` and should be part of the Lambda layer.
 
 4. **Glue Jobs** (`glue_jobs/`): Batch data processing
    - Reddit data transformation
