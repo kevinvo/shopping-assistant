@@ -167,6 +167,39 @@ else
   fi
 fi
 
+# ANSI color codes (using $'...' syntax to interpret escape sequences)
+COLOR_RESET=$'\033[0m'
+COLOR_RED=$'\033[0;31m'
+COLOR_GREEN=$'\033[0;32m'
+COLOR_YELLOW=$'\033[0;33m'
+COLOR_BLUE=$'\033[0;34m'
+COLOR_MAGENTA=$'\033[0;35m'
+COLOR_CYAN=$'\033[0;36m'
+COLOR_BRIGHT_RED=$'\033[1;31m'
+COLOR_BRIGHT_GREEN=$'\033[1;32m'
+COLOR_BRIGHT_YELLOW=$'\033[1;33m'
+COLOR_BRIGHT_BLUE=$'\033[1;34m'
+COLOR_BRIGHT_MAGENTA=$'\033[1;35m'
+COLOR_BRIGHT_CYAN=$'\033[1;36m'
+
+# Function to get color code for a log group
+get_log_color() {
+  local log_group=$1
+  case "$log_group" in
+    *websocket_connect) echo "$COLOR_CYAN" ;;
+    *websocket_message) echo "$COLOR_GREEN" ;;
+    *websocket_disconnect) echo "$COLOR_YELLOW" ;;
+    *chat_processor) echo "$COLOR_MAGENTA" ;;
+    *indexer) echo "$COLOR_BLUE" ;;
+    *scraper_worker) echo "$COLOR_BRIGHT_RED" ;;
+    *scraper) echo "$COLOR_RED" ;;
+    *glue_starter) echo "$COLOR_BRIGHT_CYAN" ;;
+    *layer_cleanup) echo "$COLOR_BRIGHT_YELLOW" ;;
+    *keep_websocket_warm) echo "$COLOR_BRIGHT_GREEN" ;;
+    *) echo "$COLOR_RESET" ;;
+  esac
+}
+
 # Function to check if log group exists and has logs
 check_log_group() {
     local log_group=$1
@@ -214,6 +247,8 @@ tail_logs() {
 follow_log_group() {
   local log_group=$1
   local prefix=$2
+  local color=$(get_log_color "$log_group")
+  local reset="$COLOR_RESET"
   # Decide snapshot window based on function type
   local snapshot_window="15m"
   case "$log_group" in
@@ -225,10 +260,12 @@ follow_log_group() {
       ;;
   esac
   # Show a recent window first to confirm activity
-  aws logs tail "$log_group" --since "$snapshot_window" --region "$REGION" --format short 2>&1 | sed "s/^/$prefix/"
+  aws logs tail "$log_group" --since "$snapshot_window" --region "$REGION" --format short 2>&1 | while IFS= read -r line; do
+    printf "%b%s%b%s\n" "$color" "$prefix" "$reset" "$line"
+  done
   # Follow new logs; avoid stdbuf (problematic on macOS/Homebrew arch); use while-read for prefixing
   aws logs tail "$log_group" --follow --region "$REGION" --format short 2>&1 | while IFS= read -r line; do
-    printf "%s%s\n" "$prefix" "$line"
+    printf "%b%s%b%s\n" "$color" "$prefix" "$reset" "$line"
   done &
 }
 
@@ -287,6 +324,7 @@ if [ "$MODE" == "follow" ]; then
       *layer_cleanup) prefix="[LAYER] " ;;
       *keep_websocket_warm) prefix="[KEEP-WARM] " ;;
     esac
+    # Color is applied inside follow_log_group function
     follow_log_group "$lg" "$prefix"
   done
     
@@ -320,7 +358,8 @@ elif [ "$MODE" == "analyze" ]; then
         *) SNAPSHOT_WINDOW="15m" ;;
       esac
     fi
-    echo "=== $label ==="
+    color=$(get_log_color "$lg")
+    echo -e "${color}=== $label ===${COLOR_RESET}"
     echo "Window: $SNAPSHOT_WINDOW"
     tmpfile="$(mktemp)"
     if ! aws logs tail "$lg" --since "$SNAPSHOT_WINDOW" --region "$REGION" --format short >"$tmpfile" 2>/dev/null; then
@@ -377,18 +416,19 @@ else
     echo "Showing recent logs (last $TIME_WINDOW)..."
     echo ""
   for lg in "${LOG_GROUPS[@]}"; do
+    color=$(get_log_color "$lg")
     case "$lg" in
-      *websocket_connect) echo "=== WEBSOCKET CONNECT HANDLER ===" ;;
-      *websocket_message) echo "=== WEBSOCKET MESSAGE HANDLER ===" ;;
-      *websocket_disconnect) echo "=== WEBSOCKET DISCONNECT HANDLER ===" ;;
-      *chat_processor) echo "=== CHAT PROCESSOR HANDLER ===" ;;
-      *indexer) echo "=== INDEXER HANDLER ===" ;;
-      *scraper) echo "=== SCRAPER TRIGGER (STEP FUNCTIONS) ===" ;;
-      *scraper_worker) echo "=== SCRAPER WORKER (LAMBDA) ===" ;;
-      *glue_starter) echo "=== GLUE STARTER HANDLER ===" ;;
-      *layer_cleanup) echo "=== LAYER CLEANUP HANDLER ===" ;;
-      *keep_websocket_warm) echo "=== KEEP WEBSOCKET WARM HANDLER ===" ;;
-      *) echo "=== $lg ===" ;;
+      *websocket_connect) echo -e "${color}=== WEBSOCKET CONNECT HANDLER ===${COLOR_RESET}" ;;
+      *websocket_message) echo -e "${color}=== WEBSOCKET MESSAGE HANDLER ===${COLOR_RESET}" ;;
+      *websocket_disconnect) echo -e "${color}=== WEBSOCKET DISCONNECT HANDLER ===${COLOR_RESET}" ;;
+      *chat_processor) echo -e "${color}=== CHAT PROCESSOR HANDLER ===${COLOR_RESET}" ;;
+      *indexer) echo -e "${color}=== INDEXER HANDLER ===${COLOR_RESET}" ;;
+      *scraper) echo -e "${color}=== SCRAPER TRIGGER (STEP FUNCTIONS) ===${COLOR_RESET}" ;;
+      *scraper_worker) echo -e "${color}=== SCRAPER WORKER (LAMBDA) ===${COLOR_RESET}" ;;
+      *glue_starter) echo -e "${color}=== GLUE STARTER HANDLER ===${COLOR_RESET}" ;;
+      *layer_cleanup) echo -e "${color}=== LAYER CLEANUP HANDLER ===${COLOR_RESET}" ;;
+      *keep_websocket_warm) echo -e "${color}=== KEEP WEBSOCKET WARM HANDLER ===${COLOR_RESET}" ;;
+      *) echo -e "${color}=== $lg ===${COLOR_RESET}" ;;
     esac
     tail_logs "$lg" ""
     echo ""
