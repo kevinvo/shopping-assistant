@@ -50,6 +50,7 @@ The application is built on AWS using a serverless architecture with the followi
 │  • Query Rewriting (context-aware reformulation)                 │
 │  • Hybrid RAG Retrieval (dense vectors + keyword signals)        │
 │  • HyPE Prompt Embeddings (hypothetical context expansion)       │
+│  • Semantic Chunker (semchunk + tiktoken for semantic splitting) │
 │  • Data Indexer (vector embeddings to Qdrant/Weaviate)          │
 │  • Reddit Scraper (daily Reddit data collection)                │
 │  • Glue Jobs (batch data processing)                             │
@@ -90,10 +91,6 @@ The application is built on AWS using a serverless architecture with the followi
    - Vector indexing and retrieval
    - LLM integration, reranking, and LangSmith logging
    - Session and connection management
-
-#### Semantic Chunking
-
-The Reddit indexer uses [semchunk](https://pypi.org/project/semchunk/) with `tiktoken` for semantic-aware text chunking, improving retrieval quality by preserving semantic boundaries. The implementation automatically falls back to `RecursiveCharacterTextSplitter` if `semchunk` is unavailable. Both `semchunk>=3.2.5` and `tiktoken>=0.7.0` are included in `requirements.txt` and should be part of the Lambda layer.
 
 4. **Glue Jobs** (`glue_jobs/`): Batch data processing
    - Reddit data transformation
