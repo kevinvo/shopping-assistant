@@ -2,6 +2,7 @@ from langchain_openai import OpenAIEmbeddings
 from typing import List, Dict, Any
 from langchain.schema import Document
 from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor
 from chalicelib.core.config import config
 from chalicelib.core.logger_config import setup_logger
 from qdrant_client import QdrantClient
@@ -173,34 +174,39 @@ class QdrantIndexer:
             query_sparse_vector = query_sparse_vector[:30]
 
         try:
-            # Get results from both dense and sparse searches
+            # Get results from both dense and sparse searches in parallel
             # Reranking will be done once on combined results in chat_session_manager.py
 
-            # Dense search
-            dense_response = self.client.query_points(
-                collection_name=self.collection_name,
-                query=query_embedding,
-                query_filter=None,
-                limit=limit * 2,  # Get more results to ensure good coverage
-                with_payload=True,
-                with_vectors=False,
-                score_threshold=0.0,
-                using="dense",  # Specify vector name
-            )
-            dense_results = dense_response.points
+            # Execute dense and sparse searches in parallel for better performance
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                dense_future = executor.submit(
+                    self.client.query_points,
+                    collection_name=self.collection_name,
+                    query=query_embedding,
+                    query_filter=None,
+                    limit=limit * 2,  # Get more results to ensure good coverage
+                    with_payload=True,
+                    with_vectors=False,
+                    score_threshold=0.0,
+                    using="dense",  # Specify vector name
+                )
+                sparse_future = executor.submit(
+                    self.client.query_points,
+                    collection_name=self.collection_name,
+                    query=query_sparse_vector,
+                    query_filter=None,
+                    limit=limit * 2,  # Get more results to ensure good coverage
+                    with_payload=True,
+                    with_vectors=False,
+                    score_threshold=0.0,
+                    using="sparse",  # Specify vector name
+                )
 
-            # Sparse search
-            sparse_response = self.client.query_points(
-                collection_name=self.collection_name,
-                query=query_sparse_vector,
-                query_filter=None,
-                limit=limit * 2,  # Get more results to ensure good coverage
-                with_payload=True,
-                with_vectors=False,
-                score_threshold=0.0,
-                using="sparse",  # Specify vector name
-            )
-            sparse_results = sparse_response.points
+                dense_response = dense_future.result()
+                sparse_response = sparse_future.result()
+
+                dense_results = dense_response.points
+                sparse_results = sparse_response.points
 
             # Combine all unique results with hybrid scoring
             all_results = []

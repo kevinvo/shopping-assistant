@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, List, Tuple, Optional, Any
 from langsmith import traceable, get_current_run_tree
 from chalicelib.indexers.indexer_factory import IndexerFactory
@@ -93,8 +94,13 @@ class Chat:
             hype_response_query = self._hype_prompt(query=rewritten_prompt)
             logger.info(f"Hype Response Query: {hype_response_query}")
 
-            search_results = self._perform_search(query=rewritten_prompt)
-            search_results_from_hype = self._perform_search(query=hype_response_query)
+            # Execute both searches in parallel for better performance
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                future1 = executor.submit(self._perform_search, rewritten_prompt)
+                future2 = executor.submit(self._perform_search, hype_response_query)
+
+                search_results = future1.result()
+                search_results_from_hype = future2.result()
 
             # Combine and deduplicate search results from both queries
             combined_results = self._combine_search_results(
