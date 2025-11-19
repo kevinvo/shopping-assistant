@@ -31,7 +31,7 @@ class QdrantIndexer:
         )
         self.embeddings = OpenAIEmbeddings(
             api_key=SecretStr(config.openai_api_key),
-            model="text-embedding-3-small",  # This is the default model
+            model="text-embedding-3-small",
         )
         self.collection_name = "reddit_posts"
 
@@ -64,11 +64,11 @@ class QdrantIndexer:
                     collection_name=self.collection_name,
                     vectors_config={
                         "dense": models.VectorParams(
-                            size=1536,  # OpenAI ada-002 embedding size
+                            size=1536,
                             distance=models.Distance.COSINE,
                         ),
                         "sparse": models.VectorParams(
-                            size=30,  # Size for BM25 sparse vectors (matches the actual dimension)
+                            size=30,
                             distance=models.Distance.DOT,
                         ),
                     },
@@ -82,7 +82,7 @@ class QdrantIndexer:
             raise
 
     def index_documents(self, docs: List[Document]) -> None:
-        # Extract texts and metadata
+
         texts: List[str] = [doc.page_content for doc in docs]
         doc_ids = [
             str(
@@ -95,27 +95,24 @@ class QdrantIndexer:
             for doc in docs
         ]
 
-        # Generate dense embeddings
         dense_embeddings: List[List[float]] = self.embeddings.embed_documents(texts)
 
-        # Generate sparse embeddings with BM25
         tokenized_texts = [text.lower().split() for text in texts]
         bm25 = BM25Okapi(tokenized_texts)
         sparse_vectors = []
 
         for doc in tokenized_texts:
-            # Get BM25 scores for all terms
+
             scores = bm25.get_scores(doc)
-            # Convert scores to list of floats and ensure correct dimension
+
             sparse_vec = [float(score) for score in scores]
-            # Pad or truncate to match expected dimension
+
             if len(sparse_vec) < 30:
                 sparse_vec.extend([0.0] * (30 - len(sparse_vec)))
             else:
                 sparse_vec = sparse_vec[:30]
             sparse_vectors.append(sparse_vec)
 
-        # Create points for Qdrant
         points = []
         for doc_id, text, dense_emb, sparse_vec, doc in zip(
             doc_ids, texts, dense_embeddings, sparse_vectors, docs
@@ -135,11 +132,12 @@ class QdrantIndexer:
             )
 
         try:
-            # Upsert points to Qdrant
+
             self.client.upsert(
                 collection_name=self.collection_name,
                 points=points,
             )
+            logger.info(f"Successfully saved {len(points)} documents to Qdrant")
         except Exception as e:
             logger.error(f"Error indexing documents: {e}")
             raise
@@ -159,47 +157,43 @@ class QdrantIndexer:
         Returns:
             List of SearchResult objects
         """
-        # Generate dense embedding for query
+
         query_embedding = self.embeddings.embed_query(query)
 
-        # Generate sparse embedding for query
         query_tokens = query.lower().split()
         tokenized_texts = [query_tokens]
         bm25 = BM25Okapi(tokenized_texts)
         query_sparse_vector = [float(score) for score in bm25.get_scores(query_tokens)]
-        # Ensure query sparse vector has correct dimension
+
         if len(query_sparse_vector) < 30:
             query_sparse_vector.extend([0.0] * (30 - len(query_sparse_vector)))
         else:
             query_sparse_vector = query_sparse_vector[:30]
 
         try:
-            # Get results from both dense and sparse searches in parallel
-            # Reranking will be done once on combined results in chat_session_manager.py
 
-            # Execute dense and sparse searches in parallel for better performance
             with ThreadPoolExecutor(max_workers=2) as executor:
                 dense_future = executor.submit(
                     self.client.query_points,
                     collection_name=self.collection_name,
                     query=query_embedding,
                     query_filter=None,
-                    limit=limit * 2,  # Get more results to ensure good coverage
+                    limit=limit * 2,
                     with_payload=True,
                     with_vectors=False,
                     score_threshold=0.0,
-                    using="dense",  # Specify vector name
+                    using="dense",
                 )
                 sparse_future = executor.submit(
                     self.client.query_points,
                     collection_name=self.collection_name,
                     query=query_sparse_vector,
                     query_filter=None,
-                    limit=limit * 2,  # Get more results to ensure good coverage
+                    limit=limit * 2,
                     with_payload=True,
                     with_vectors=False,
                     score_threshold=0.0,
-                    using="sparse",  # Specify vector name
+                    using="sparse",
                 )
 
                 dense_response = dense_future.result()
@@ -208,11 +202,9 @@ class QdrantIndexer:
                 dense_results = dense_response.points
                 sparse_results = sparse_response.points
 
-            # Combine all unique results with hybrid scoring
             all_results = []
             seen_texts = set()
 
-            # Add results from both searches
             self._add_search_results(
                 search_results=dense_results,
                 source="dense",
@@ -226,12 +218,9 @@ class QdrantIndexer:
                 seen_texts=seen_texts,
             )
 
-            # Sort by score and return top results
-            # Reranking will happen once in chat_session_manager.py after combining both query results
             all_results.sort(key=lambda x: x["score"], reverse=True)
             top_results = all_results[:limit]
 
-            # Extract and format results
             return [
                 SearchResult(
                     text=result["payload"]["text"],
