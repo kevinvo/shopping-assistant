@@ -146,6 +146,20 @@ class RerankerJudgment:
 
 
 @dataclass
+class RewriteAndHyDEResult:
+    """Result from combined query rewrite and HyDE generation."""
+
+    rewritten_query: str
+    hyde_response: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "rewritten_query": self.rewritten_query,
+            "hyde_response": self.hyde_response,
+        }
+
+
+@dataclass
 class RedditComment:
     id: str
     score: int

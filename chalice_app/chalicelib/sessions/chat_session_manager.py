@@ -84,15 +84,14 @@ class Chat:
             except Exception as meta_error:
                 logger.warning(f"Failed to add session metadata: {meta_error}")
 
-            rewritten_prompt = self._rewrite_prompt(
-                query=query, chat_messages=chat_messages
+            result = self.llm.rewrite_and_generate_hyde(
+                last_message_content=query, message_history=chat_messages
             )
+            rewritten_prompt = result.rewritten_query
+            hype_response_query = result.hyde_response
 
-            # Log both for debugging/transparency
             logger.info(f"Original query: {query}")
             logger.info(f"Rewritten query: {rewritten_prompt}")
-
-            hype_response_query = self._hype_prompt(query=rewritten_prompt)
             logger.info(f"Hype Response Query: {hype_response_query}")
 
             # Execute both searches in parallel for better performance
@@ -178,16 +177,6 @@ class Chat:
         except Exception as e:
             logger.error(f"Error in chat processing: {str(e)}", exc_info=True)
             raise
-
-    @measure_execution_time
-    def _rewrite_prompt(self, query: str, chat_messages: List[ChatMessage]) -> str:
-        return self.llm.rewrite_prompt(
-            last_message_content=query, message_history=chat_messages
-        )
-
-    @measure_execution_time
-    def _hype_prompt(self, query: str) -> str:
-        return self.llm.generate_hyde(query=query)
 
     @measure_execution_time
     def _perform_search(self, query: str) -> List[SearchResult]:

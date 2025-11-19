@@ -1,3 +1,4 @@
+import json
 import logging
 from typing import List
 from abc import ABC, abstractmethod
@@ -5,7 +6,7 @@ from enum import Enum
 from openai import OpenAI
 from chalicelib.core.config import AppConfig
 from chalicelib.core.performance_timer import measure_execution_time
-from chalicelib.models.data_objects import ChatMessage
+from chalicelib.models.data_objects import ChatMessage, RewriteAndHyDEResult
 from langsmith import traceable
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
@@ -167,60 +168,75 @@ class BaseLLM(ABC):
     def chat(self, messages: List[ChatMessage], **kwargs) -> str:
         pass
 
-    @traceable(name="rewrite_prompt")
-    def rewrite_prompt(
+    @traceable(name="rewrite_and_generate_hyde")
+    @measure_execution_time
+    def rewrite_and_generate_hyde(
         self, last_message_content: str, message_history: List[ChatMessage]
-    ) -> str:
-        logger.info(f"Original prompt: {last_message_content}")
+    ) -> RewriteAndHyDEResult:
+        """
+        Rewrite the query with context and generate HyDE in a single LLM call.
+        Reuses existing rewrite and HyDE prompts.
+        """
+        logger.info(f"Combined rewrite and HyDE for prompt: {last_message_content}")
 
-        # Create a copy of message_history to avoid modifying the original
         message_history_copy = message_history.copy()
 
-        # Keep system prompt (typically first message) and last 4 messages
         recent_messages_count = 6
         if len(message_history_copy) > recent_messages_count + 1:
-            # Keep the first message (system prompt) and the last 4 messages
             message_history_copy = [message_history_copy[0]] + message_history_copy[
                 -recent_messages_count:
             ]
 
-        # Add explicit instruction to detect topic changes
-        rewrite_request = ChatMessage(
-            role="user",
-            content=PROMPT_REWRITE_INSTRUCTION.format(query=last_message_content),
+        combined_system_prompt = (
+            CONTEXT_AWARE_PROMPT_REWRITING
+            + "\n\nFocus only on the most recent and relevant context. "
+            + "If the user is asking about a new topic, completely ignore previous topics.\n\n"
+            + HYDE_SYSTEM_PROMPT
         )
 
-        # Replace the system prompt with context-aware rewriting instructions
+        combined_user_prompt = f"""
+    Perform these two tasks in order:
+
+    TASK 1 - Rewrite the query:
+    {PROMPT_REWRITE_INSTRUCTION.format(query=last_message_content)}
+
+    TASK 2 - Generate HyDE:
+    After rewriting the query, use the rewritten query to generate a hypothetical answer.
+    {HYDE_GENERATION_PROMPT.format(query="[USE YOUR REWRITTEN QUERY FROM TASK 1]")}
+
+    Return a JSON object with both results:
+    {{
+      "rewritten_query": "your rewritten query here",
+      "hyde_response": "your hypothetical answer here"
+    }}
+    """
+
         if len(message_history_copy) > 0:
-            system_content = (
-                CONTEXT_AWARE_PROMPT_REWRITING
-                + "\nFocus only on the most recent and relevant context. "
-                + "If the user is asking about a new topic, completely ignore previous topics."
-            )
             message_history_copy[0] = ChatMessage(
                 role="system",
-                content=system_content,
+                content=combined_system_prompt,
             )
 
-        message_history_copy.append(rewrite_request)
-        rewritten_prompt = self.chat(
-            messages=message_history_copy, temperature=0.3, max_tokens=500
+        message_history_copy.append(
+            ChatMessage(role="user", content=combined_user_prompt)
         )
 
-        logger.info(f"Rewritten prompt: {rewritten_prompt}")
-        return rewritten_prompt
+        response = self.chat(
+            messages=message_history_copy,
+            temperature=0.4,
+            max_tokens=700,
+            json_mode=True,
+        )
 
-    @traceable(name="generate_hyde")
-    def generate_hyde(self, query: str) -> str:
-        logger.info(f"Generating HyDE for query: {query}")
+        result = json.loads(response)
 
-        messages = [
-            ChatMessage(role="system", content=HYDE_SYSTEM_PROMPT),
-            ChatMessage(
-                role="user", content=HYDE_GENERATION_PROMPT.format(query=query)
-            ),
-        ]
-        return self.chat(messages=messages, temperature=0.5, max_tokens=200)
+        logger.info(f"Rewritten query: {result['rewritten_query']}")
+        logger.info(f"HyDE response: {result['hyde_response']}")
+
+        return RewriteAndHyDEResult(
+            rewritten_query=result["rewritten_query"],
+            hyde_response=result["hyde_response"],
+        )
 
 
 class DeepSeekClient(BaseLLM):

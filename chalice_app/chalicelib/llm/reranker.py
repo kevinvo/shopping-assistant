@@ -76,8 +76,12 @@ class BM25Reranker:
             bm25 = BM25Okapi(tokenized_docs)
             scores = bm25.get_scores(query_tokens)
 
-            min_score = min(scores) if scores else 0.0
-            max_score = max(scores) if scores else 1.0
+            if len(scores) == 0:
+                logger.warning("No scores returned from BM25")
+                return results[:limit]
+
+            min_score = float(min(scores))
+            max_score = float(max(scores))
             score_range = max_score - min_score if max_score > min_score else 1.0
 
             normalized_scores = [
