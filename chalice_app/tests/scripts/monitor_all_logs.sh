@@ -26,6 +26,45 @@ if [[ "$MODE" == "analyze" && "$TIME_WINDOW" == "5m" ]]; then
 fi
 REGION="ap-southeast-1"
 
+# Track background process IDs for cleanup
+declare -a BACKGROUND_PIDS=()
+
+# Cleanup function to kill all background processes
+cleanup() {
+  echo ""
+  echo "Stopping log monitoring..."
+  # Kill all background processes we spawned
+  for pid in "${BACKGROUND_PIDS[@]}"; do
+    if kill -0 "$pid" 2>/dev/null; then
+      # Kill the process and its process group (children)
+      kill -TERM -"$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+    fi
+  done
+  # Kill any remaining background jobs
+  jobs -p | while read -r job_pid; do
+    kill -TERM "$job_pid" 2>/dev/null || true
+  done
+  # Kill any remaining aws logs tail processes that are children of this script
+  pkill -P $$ -f "aws logs tail.*--follow" 2>/dev/null || true
+  # Wait a moment for processes to terminate
+  sleep 0.2
+  # Force kill any remaining processes
+  for pid in "${BACKGROUND_PIDS[@]}"; do
+    if kill -0 "$pid" 2>/dev/null; then
+      kill -KILL -"$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+    fi
+  done
+  jobs -p | while read -r job_pid; do
+    kill -KILL "$job_pid" 2>/dev/null || true
+  done
+  wait 2>/dev/null || true
+  echo "Stopped."
+  exit 0
+}
+
+# Set up signal handlers
+trap cleanup SIGINT SIGTERM EXIT
+
 # WebSocket handler Lambda functions
 CONNECT_LOG="/aws/lambda/shopping-assistant-api-chalice-test-websocket_connect"
 MESSAGE_LOG="/aws/lambda/shopping-assistant-api-chalice-test-websocket_message"
@@ -264,9 +303,14 @@ follow_log_group() {
     printf "%b%s%b%s\n" "$color" "$prefix" "$reset" "$line"
   done
   # Follow new logs; avoid stdbuf (problematic on macOS/Homebrew arch); use while-read for prefixing
-  aws logs tail "$log_group" --follow --region "$REGION" --format short 2>&1 | while IFS= read -r line; do
-    printf "%b%s%b%s\n" "$color" "$prefix" "$reset" "$line"
-  done &
+  # Run in background and track PID for cleanup
+  (
+    aws logs tail "$log_group" --follow --region "$REGION" --format short 2>&1 | while IFS= read -r line; do
+      printf "%b%s%b%s\n" "$color" "$prefix" "$reset" "$line"
+    done
+  ) &
+  local bg_pid=$!
+  BACKGROUND_PIDS+=("$bg_pid")
 }
 
 echo "======================================================================"
