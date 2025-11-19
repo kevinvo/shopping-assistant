@@ -290,10 +290,10 @@ if [ "$MODE" == "follow" ]; then
     echo "Following logs in real-time (Ctrl+C to stop)..."
     echo "Note: You may not see output until new logs arrive"
     echo ""
-  # If a single target is selected, directly exec aws logs tail (best parity with manual usage)
+  # If a single target is selected, use prefixing for consistency
   if [[ ${#LOG_GROUPS[@]} -eq 1 ]]; then
     lg="${LOG_GROUPS[0]}"
-    echo "[INFO] Using direct follow for: $lg"
+    echo "[INFO] Following logs for: $lg"
     # Decide snapshot window for direct follow
     SNAPSHOT_WINDOW="15m"
     case "$lg" in
@@ -304,8 +304,30 @@ if [ "$MODE" == "follow" ]; then
         SNAPSHOT_WINDOW="14d"
         ;;
     esac
-    aws logs tail "$lg" --since "$SNAPSHOT_WINDOW" --region "$REGION" --format short
-    aws logs tail "$lg" --follow --region "$REGION" --format short
+    # Determine prefix
+    prefix="[LOG] "
+    case "$lg" in
+      *websocket_connect) prefix="[WS-CONNECT] " ;;
+      *websocket_message) prefix="[WS-MESSAGE] " ;;
+      *websocket_disconnect) prefix="[WS-DISCONNECT] " ;;
+      *chat_processor) prefix="[CHAT-PROC] " ;;
+      *indexer) prefix="[INDEXER] " ;;
+      *scraper_worker) prefix="[SCRAPER-WORKER] " ;;
+      *scraper) prefix="[SCRAPER-TRIGGER] " ;;
+      *glue_starter) prefix="[GLUE] " ;;
+      *layer_cleanup) prefix="[LAYER] " ;;
+      *keep_websocket_warm) prefix="[KEEP-WARM] " ;;
+    esac
+    color=$(get_log_color "$lg")
+    reset="$COLOR_RESET"
+    # Show snapshot with prefix
+    aws logs tail "$lg" --since "$SNAPSHOT_WINDOW" --region "$REGION" --format short 2>&1 | while IFS= read -r line; do
+      printf "%b%s%b%s\n" "$color" "$prefix" "$reset" "$line"
+    done
+    # Follow with prefix
+    aws logs tail "$lg" --follow --region "$REGION" --format short 2>&1 | while IFS= read -r line; do
+      printf "%b%s%b%s\n" "$color" "$prefix" "$reset" "$line"
+    done
     exit 0
   fi
 
