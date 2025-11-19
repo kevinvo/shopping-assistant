@@ -11,7 +11,8 @@ from chalicelib.models.data_objects import (
     SearchResult,
     RetrievalMetricsDocument,
 )
-from chalicelib.llm import LLMFactory, LLMProvider, LLMReranker
+from chalicelib.llm import LLMFactory, LLMProvider, BM25Reranker
+from chalicelib.llm.reranker import RerankerInput
 from chalicelib.core.config import config
 from chalicelib.services.langsmith import log_customer_query
 
@@ -42,7 +43,7 @@ class Chat:
         self.indexer = IndexerFactory.create_indexer()
         llm_provider = LLMProvider.DEEPSEEK
         self.llm = LLMFactory.create_llm(provider=llm_provider)
-        self.reranker = LLMReranker(llm_provider=llm_provider)
+        self.reranker = BM25Reranker()
 
     @measure_execution_time
     @traceable(name="chat_session")
@@ -230,24 +231,35 @@ class Chat:
         self, query: str, results: List[SearchResult], limit: int
     ) -> List[SearchResult]:
         """
-        Rerank search results using LLM for better relevance.
+        Rerank search results using BM25 for better relevance.
         Converts SearchResult objects to reranker format and back.
         """
         if not results or len(results) <= limit:
             return results[:limit]
 
-        # Convert SearchResult objects to reranker dict format
-        results_dicts = [result.to_reranker_dict() for result in results]
+        # Convert SearchResult objects to RerankerInput dataclass
+        reranker_inputs = [
+            RerankerInput(
+                text=result.text,
+                metadata=result.metadata,
+                score=result.score,
+            )
+            for result in results
+        ]
 
-        # Rerank using LLM
-        reranked_dicts = self.reranker.rerank(
-            query=query, results=results_dicts, limit=limit
+        # Rerank using BM25
+        reranked_inputs = self.reranker.rerank(
+            query=query, results=reranker_inputs, limit=limit
         )
 
         # Convert back to SearchResult objects
         reranked_results = [
-            SearchResult.from_reranker_dict(result_dict)
-            for result_dict in reranked_dicts
+            SearchResult(
+                text=input_item.text,
+                metadata=input_item.metadata,
+                score=input_item.score,
+            )
+            for input_item in reranked_inputs
         ]
 
         logger.info(f"Reranked {len(results)} results to top {len(reranked_results)}")

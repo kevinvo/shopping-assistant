@@ -7,7 +7,7 @@ from .client import (  # noqa: F401
     LLMProvider,
 )
 from .metrics import RetrievalMetrics, RetrievalMetricsResult  # noqa: F401
-from .reranker import LLMReranker  # noqa: F401
+from .reranker import BM25Reranker  # noqa: F401
 
 __all__ = [
     "BaseLLM",
@@ -16,5 +16,5 @@ __all__ = [
     "LLMProvider",
     "RetrievalMetrics",
     "RetrievalMetricsResult",
-    "LLMReranker",
+    "BM25Reranker",
 ]
