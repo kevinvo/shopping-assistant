@@ -119,7 +119,7 @@ jobs:
     - name: Deploy Chalice stage with validation
       if: github.ref == 'refs/heads/main' && github.event_name == 'push'
       run: |
-        python chalice_app/scripts/deploy_chalice_stage.py --stage chalice-test --region ${{ env.AWS_REGION }}
+        python chalice_app/scripts/deploy.py --stage chalice-test --region ${{ env.AWS_REGION }}
 
     - name: Verify and Fix Layer Attachment
       if: github.ref == 'refs/heads/main' && github.event_name == 'push'

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reliable Chalice deploy wrapper with mapping reconciliation."""
+"""Unified Chalice deployment script with layer attachment and validation."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, Iterable, List, Optional
 
 import boto3
 from botocore.exceptions import ClientError
@@ -19,9 +19,10 @@ from botocore.exceptions import ClientError
 DEFAULT_REGION = "ap-southeast-1"
 DEFAULT_MAX_ATTEMPTS = 2
 DEFAULT_MAX_VISIBLE_MESSAGES = 10
-DEFAULT_MAX_INFLIGHT_MESSAGES = (
-    20  # Increased to allow for concurrent Lambda processing
-)
+DEFAULT_MAX_INFLIGHT_MESSAGES = 20
+DEFAULT_LAYER_NAME = "shopping-assistant-chalice-layer"
+DEFAULT_MAX_RETRIES = 3
+DEFAULT_RETRY_DELAY = 5
 
 
 def log(level: str, message: str) -> None:
@@ -30,6 +31,10 @@ def log(level: str, message: str) -> None:
 
 class DeployError(RuntimeError):
     """Raised when deployment or validation fails."""
+
+
+class LayerAttachError(RuntimeError):
+    """Raised when layer attachment fails."""
 
 
 @dataclass
@@ -41,6 +46,12 @@ class EventMapping:
     queue_url: str
     queue_arn: str
     batch_size: int
+
+
+@dataclass
+class FunctionLayers:
+    function_name: str
+    existing_layers: List[str]
 
 
 def load_config(stage: str, config_path: Path) -> Dict:
@@ -194,6 +205,165 @@ def retry_chalice_deploy(stage: str, max_attempts: int, app_dir: Path) -> None:
             time.sleep(10)
 
 
+def fetch_latest_layer_arn(layer_name: str, region: str) -> str:
+    client = boto3.client("lambda", region_name=region)
+    try:
+        response = client.list_layer_versions(
+            LayerName=layer_name,
+            MaxItems=1,
+        )
+    except ClientError as exc:
+        raise LayerAttachError(
+            f"Failed to list layer versions for {layer_name}: {exc.response.get('Error', {}).get('Message', exc)}"
+        ) from exc
+
+    versions = response.get("LayerVersions", [])
+    if not versions:
+        raise LayerAttachError(
+            f"No versions found for layer '{layer_name}' in region '{region}'"
+        )
+
+    return versions[0]["LayerVersionArn"]
+
+
+def list_chalice_functions(stage: str, lambda_client) -> List[str]:
+    prefix = f"shopping-assistant-api-{stage}"
+    functions: List[str] = []
+    paginator = lambda_client.get_paginator("list_functions")
+
+    for page in paginator.paginate():
+        for function in page.get("Functions", []):
+            name = function.get("FunctionName", "")
+            if name.startswith(prefix):
+                functions.append(name)
+
+    return functions
+
+
+def fetch_function_layers(lambda_client, function_name: str) -> FunctionLayers:
+    response = lambda_client.get_function_configuration(FunctionName=function_name)
+    layers = [layer.get("Arn", "") for layer in response.get("Layers", [])]
+    layers = [layer for layer in layers if layer]
+    return FunctionLayers(function_name=function_name, existing_layers=layers)
+
+
+def replace_layer_versions(
+    current_layers: Iterable[str], new_layer_arn: str
+) -> List[str]:
+    new_layer_name = (
+        new_layer_arn.split(":")[-2] if ":" in new_layer_arn else new_layer_arn
+    )
+    kept_layers = []
+    for layer in current_layers:
+        layer_name = layer.split(":")[-2] if ":" in layer else layer
+        if layer_name != new_layer_name:
+            kept_layers.append(layer)
+    kept_layers.append(new_layer_arn)
+    return kept_layers
+
+
+def attach_layer_to_functions(*, stage: str, region: str, layer_arn: str) -> None:
+    lambda_client = boto3.client("lambda", region_name=region)
+
+    function_names = list_chalice_functions(stage, lambda_client)
+    if not function_names:
+        raise LayerAttachError(
+            f"No Lambda functions found for stage '{stage}' (prefix shopping-assistant-api-{stage})"
+        )
+
+    log("INFO", f"Found {len(function_names)} function(s) to update")
+
+    for function_name in function_names:
+        details = fetch_function_layers(lambda_client, function_name)
+        layers = replace_layer_versions(details.existing_layers, layer_arn)
+
+        log("INFO", f"Updating {function_name} with {len(layers)} layer(s)")
+        try:
+            lambda_client.update_function_configuration(
+                FunctionName=function_name,
+                Layers=layers,
+            )
+        except ClientError as exc:
+            raise LayerAttachError(
+                f"Failed to update {function_name}: {exc.response.get('Error', {}).get('Message', exc)}"
+            ) from exc
+
+    log("INFO", "Layer attachment completed")
+
+
+def verify_layer_attachment(stage: str, region: str, layer_arn: str) -> bool:
+    lambda_client = boto3.client("lambda", region_name=region)
+    function_names = list_chalice_functions(stage, lambda_client)
+    if not function_names:
+        raise DeployError(
+            f"No Lambda functions found for stage '{stage}' when verifying layer"
+        )
+
+    target_layer_name = layer_arn.split(":")[-2]
+
+    missing: List[str] = []
+    for function_name in function_names:
+        response = lambda_client.get_function_configuration(FunctionName=function_name)
+        layers = [layer.get("Arn", "") for layer in response.get("Layers", [])]
+        if not any(target_layer_name in layer for layer in layers):
+            missing.append(function_name)
+
+    if missing:
+        log(
+            "WARN",
+            f"Layer missing from {len(missing)} function(s): {', '.join(missing)}",
+        )
+        return False
+
+    return True
+
+
+def attach_and_verify_layer(
+    stage: str,
+    region: str,
+    layer_name: str,
+    max_retries: int,
+    retry_delay: int,
+) -> None:
+    """Attach layer to all functions with retries and verification."""
+    try:
+        layer_arn = fetch_latest_layer_arn(layer_name, region)
+    except LayerAttachError as exc:
+        raise DeployError(str(exc)) from exc
+
+    log(
+        "INFO", "======================================================================"
+    )
+    log("INFO", "Post-Deployment Layer Attachment")
+    log(
+        "INFO", "======================================================================"
+    )
+    log("INFO", f"Stage: {stage}")
+    log("INFO", f"Region: {region}")
+    log("INFO", f"Layer Name: {layer_name}")
+    log("INFO", f"Layer ARN: {layer_arn}")
+
+    attempt = 0
+    while attempt < max_retries:
+        attempt += 1
+        log("INFO", f"Attempt {attempt} of {max_retries}")
+        try:
+            attach_layer_to_functions(stage=stage, region=region, layer_arn=layer_arn)
+        except LayerAttachError as exc:
+            log("WARN", f"Layer attachment failed: {exc}")
+        else:
+            if verify_layer_attachment(stage, region, layer_arn):
+                log("INFO", "✅ Post-deployment layer attachment complete!")
+                return
+            log("WARN", "Layer verification failed; retrying")
+
+        if attempt < max_retries:
+            log("INFO", f"Waiting {retry_delay} seconds before retry...")
+            time.sleep(retry_delay)
+
+    raise DeployError("Failed to attach layer after retries")
+
+
 def ensure_post_deploy(
     stage: str,
     env_vars: Dict[str, str],
@@ -275,22 +445,10 @@ def ensure_post_deploy(
     raise DeployError("SQS backlog validation failed after all retries")
 
 
-def attach_layer(stage: str, region: str, scripts_dir: Path) -> None:
-    script = scripts_dir / "post_deploy_attach_layer.py"
-    run_command(
-        [
-            "python",
-            str(script),
-            "--stage",
-            stage,
-            "--region",
-            region,
-        ]
-    )
-
-
 def parse_args(argv: List[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Reliable Chalice deploy wrapper")
+    parser = argparse.ArgumentParser(
+        description="Unified Chalice deployment with layer attachment"
+    )
     parser.add_argument(
         "--stage", default="chalice-test", help="Chalice stage to deploy"
     )
@@ -312,6 +470,23 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
         type=int,
         default=DEFAULT_MAX_INFLIGHT_MESSAGES,
         help="Maximum allowed in-flight SQS messages",
+    )
+    parser.add_argument(
+        "--layer-name",
+        default=DEFAULT_LAYER_NAME,
+        help="Name of the Lambda layer to attach",
+    )
+    parser.add_argument(
+        "--layer-max-retries",
+        type=int,
+        default=DEFAULT_MAX_RETRIES,
+        help="Number of layer attachment retries",
+    )
+    parser.add_argument(
+        "--layer-retry-delay",
+        type=int,
+        default=DEFAULT_RETRY_DELAY,
+        help="Seconds to wait between layer attachment retries",
     )
     return parser.parse_args(argv)
 
@@ -352,8 +527,14 @@ def main(argv: List[str]) -> int:
 
     # Attach layer after successful deploy.
     try:
-        attach_layer(args.stage, args.region, scripts_dir)
-    except subprocess.CalledProcessError as exc:
+        attach_and_verify_layer(
+            args.stage,
+            args.region,
+            args.layer_name,
+            args.layer_max_retries,
+            args.layer_retry_delay,
+        )
+    except DeployError as exc:
         log("ERROR", f"Layer attachment failed: {exc}")
         return 1
 

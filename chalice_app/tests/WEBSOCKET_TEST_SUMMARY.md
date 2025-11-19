@@ -36,7 +36,7 @@
 
 ## Deployment & Recovery Checklist
 
-1. Activate the virtualenv and run `chalice_app/scripts/deploy_chalice_stage.sh chalice-test` from the repo root.
+1. Activate the virtualenv and run `python chalice_app/scripts/deploy.py --stage chalice-test` from the repo root.
 2. If the wrapper fails, fix the reported issue and rerun the script until it succeeds.
 3. Confirm the automated validation or rerun manually:
    - `aws lambda list-event-source-mappings --function-name shopping-assistant-api-chalice-test-chat_processor --region ap-southeast-1`

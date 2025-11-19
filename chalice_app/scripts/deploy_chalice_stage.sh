@@ -4,5 +4,5 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
-exec python "${SCRIPT_DIR}/deploy_chalice_stage.py" "$@"
+exec python "${SCRIPT_DIR}/deploy.py" "$@"
 
