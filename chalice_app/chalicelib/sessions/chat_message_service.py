@@ -224,16 +224,125 @@ def process_message(message_payload: MessagePayload) -> None:
             },
         )
 
-        # Process the chat message
+        accumulated_response = []
+        connection_valid = [True]
+        messageId = request_id
+        start_sent = [False]
+
+        def streaming_callback(chunk: str) -> None:
+            if not connection_valid[0]:
+                return
+
+            current_connection_info = get_connection_info(connection_id=connection_id)
+            if current_connection_info is None:
+                logger.warning(
+                    f"Connection {connection_id} disconnected during streaming, "
+                    f"stopping chunk delivery for request {request_id}"
+                )
+                connection_valid[0] = False
+                return
+
+            try:
+                if not start_sent[0]:
+                    start_response = ResponsePayload.create_message_start(
+                        request_id=request_id, messageId=messageId
+                    )
+                    send_message(
+                        connection_id=connection_id,
+                        domain_name=domain_name,
+                        stage=stage,
+                        message=start_response,
+                    )
+                    start_sent[0] = True
+
+                chunk_response = ResponsePayload.create_message_chunk(
+                    request_id=request_id, content=chunk, messageId=messageId
+                )
+                send_message(
+                    connection_id=connection_id,
+                    domain_name=domain_name,
+                    stage=stage,
+                    message=chunk_response,
+                )
+                accumulated_response.append(chunk)
+            except ClientError as e:
+                if e.response.get("Error", {}).get("Code") == "GoneException":
+                    logger.warning(
+                        f"Connection {connection_id} disconnected during streaming chunk send, "
+                        f"stopping chunk delivery for request {request_id}"
+                    )
+                    connection_valid[0] = False
+                else:
+                    logger.error(
+                        f"Error sending streaming chunk: {str(e)}",
+                        exc_info=True,
+                    )
+                accumulated_response.append(chunk)
+            except Exception as chunk_error:
+                logger.error(
+                    f"Error sending streaming chunk: {str(chunk_error)}",
+                    exc_info=True,
+                )
+                accumulated_response.append(chunk)
+
         response_message, updated_chat_history, eval_metadata = Chat().process_chat(
             query=user_message,
             session_id=connection_id,
             chat_history=[hist.to_dict() for hist in connection_info.chat_history],
-            socket_id=connection_id,  # Pass the actual WebSocket connection ID
+            socket_id=connection_id,
             request_id=request_id,
+            streaming_callback=streaming_callback,
         )
+
+        if accumulated_response:
+            full_response = "".join(accumulated_response)
+        else:
+            full_response = response_message
+
         connection_info.chat_history = updated_chat_history
         persist_connection_info(connection_info=connection_info)
+
+        if not connection_valid[0]:
+            logger.warning(
+                f"Connection {connection_id} was disconnected during streaming, "
+                f"skipping completion message for request {request_id}"
+            )
+        else:
+            current_connection_info = get_connection_info(connection_id=connection_id)
+            if current_connection_info is None:
+                logger.warning(
+                    f"Connection {connection_id} disconnected before completion, "
+                    f"skipping completion message for request {request_id}"
+                )
+            else:
+                try:
+                    if start_sent[0]:
+                        end_response = ResponsePayload.create_message_end(
+                            request_id=request_id, messageId=messageId
+                        )
+                        send_message(
+                            connection_id=connection_id,
+                            domain_name=domain_name,
+                            stage=stage,
+                            message=end_response,
+                        )
+                except ClientError as e:
+                    if e.response.get("Error", {}).get("Code") == "GoneException":
+                        logger.warning(
+                            f"Connection {connection_id} disconnected while sending completion "
+                            f"for request {request_id}"
+                        )
+                    else:
+                        logger.error(
+                            f"Error sending streaming complete: {str(e)}",
+                            exc_info=True,
+                        )
+                except Exception as complete_error:
+                    logger.error(
+                        f"Error sending streaming complete: {str(complete_error)}",
+                        exc_info=True,
+                    )
+
         logger.info(
             "Generated chat response",
             extra=LogExtra(
@@ -249,30 +358,18 @@ def process_message(message_payload: MessagePayload) -> None:
                 connection_id=connection_id,
             ).to_dict()
             | {
-                "response_preview": response_message[:200],
+                "response_preview": full_response[:200],
                 "evaluation_keys": list((eval_metadata or {}).keys()),
             },
         )
 
-        # Create a response payload
-        response = ResponsePayload.create_message(
-            request_id=request_id, content=response_message
-        )
-
-        # Send the response back to the client
-        send_message(
-            connection_id=connection_id,
-            domain_name=domain_name,
-            stage=stage,
-            message=response,
-        )
-
-        logger.info(f"Successfully sent response for request {request_id}")
+        logger.info(f"Successfully sent streaming response for request {request_id}")
 
         # Trigger async evaluation (after user receives response)
+        # Use full_response which includes all accumulated chunks
         trigger_async_evaluation(
             query=user_message,
-            response=response_message,
+            response=full_response,
             session_id=connection_id,
             request_id=request_id,
             metadata=eval_metadata,

@@ -12,6 +12,9 @@ class MessageType(str, Enum):
     MESSAGE = "message"
     PROCESSING = "processing"
     ERROR = "error"
+    MESSAGE_START = "message_start"
+    MESSAGE_CHUNK = "message_chunk"
+    MESSAGE_END = "message_end"
 
 
 @dataclass
@@ -337,6 +340,7 @@ class ResponsePayload:
     content: str
     request_id: str
     timestamp: str
+    messageId: Optional[str] = None
 
     @classmethod
     def from_dict(cls, data: dict) -> "ResponsePayload":
@@ -346,11 +350,15 @@ class ResponsePayload:
             content=data.get("content", ""),
             request_id=data.get("request_id", ""),
             timestamp=data.get("timestamp", ""),
+            messageId=data.get("messageId"),
         )
 
     def to_dict(self) -> dict:
         """Convert the ResponsePayload to a dictionary."""
-        return asdict(self)
+        result = asdict(self)
+        if result.get("messageId") is None:
+            result.pop("messageId", None)
+        return result
 
     def to_json(self) -> str:
         """Convert the ResponsePayload to a JSON string."""
@@ -391,4 +399,40 @@ class ResponsePayload:
             content=content,
             request_id=request_id,
             timestamp=datetime.now().isoformat(),
+        )
+
+    @classmethod
+    def create_message_start(
+        cls, *, request_id: str, messageId: str
+    ) -> "ResponsePayload":
+        return cls(
+            type=MessageType.MESSAGE_START,
+            content="",
+            request_id=request_id,
+            timestamp=datetime.now().isoformat(),
+            messageId=messageId,
+        )
+
+    @classmethod
+    def create_message_chunk(
+        cls, *, request_id: str, content: str, messageId: str
+    ) -> "ResponsePayload":
+        return cls(
+            type=MessageType.MESSAGE_CHUNK,
+            content=content,
+            request_id=request_id,
+            timestamp=datetime.now().isoformat(),
+            messageId=messageId,
+        )
+
+    @classmethod
+    def create_message_end(
+        cls, *, request_id: str, messageId: str
+    ) -> "ResponsePayload":
+        return cls(
+            type=MessageType.MESSAGE_END,
+            content="",
+            request_id=request_id,
+            timestamp=datetime.now().isoformat(),
+            messageId=messageId,
         )

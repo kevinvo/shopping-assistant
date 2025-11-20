@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import List
+from typing import List, Generator
 from abc import ABC, abstractmethod
 from enum import Enum
 from openai import OpenAI
@@ -168,6 +168,12 @@ class BaseLLM(ABC):
     def chat(self, messages: List[ChatMessage], **kwargs) -> str:
         pass
 
+    def stream_chat(
+        self, messages: List[ChatMessage], **kwargs
+    ) -> Generator[str, None, None]:
+        full_response = self.chat(messages, **kwargs)
+        yield full_response
+
     @traceable(name="rewrite_and_generate_hyde")
     @measure_execution_time
     def rewrite_and_generate_hyde(
@@ -297,6 +303,37 @@ class DeepSeekClient(BaseLLM):
             return str(response.content) if response.content else ""
         except Exception as e:
             logger.error(f"Error in DeepSeek chat: {e}")
+            raise
+
+    @measure_execution_time
+    @traceable(name="deepseek_stream_chat")
+    def stream_chat(
+        self, messages: List[ChatMessage], **kwargs
+    ) -> Generator[str, None, None]:
+        try:
+            langchain_messages = [m.to_langchain_message() for m in messages]
+            _ensure_models_rebuilt()
+
+            model_kwargs = {}
+            if kwargs.get("json_mode", False):
+                model_kwargs["response_format"] = {"type": "json_object"}
+
+            langchain_client = ChatOpenAI(
+                model=self.model,
+                api_key=SecretStr(self.config.openrouter_api_key),
+                base_url="https://openrouter.ai/api/v1",
+                temperature=kwargs.get("temperature", 0.7),
+                top_p=kwargs.get("top_p", 0.95),
+                max_tokens=kwargs.get("max_tokens", 2000),  # type: ignore[arg-type]
+                model_kwargs=model_kwargs,
+                default_headers=self._build_headers(),
+            )
+
+            for chunk in langchain_client.stream(langchain_messages):
+                if chunk.content:
+                    yield chunk.content
+        except Exception as e:
+            logger.error(f"Error in DeepSeek stream_chat: {e}")
             raise
 
 

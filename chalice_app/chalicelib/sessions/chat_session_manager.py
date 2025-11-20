@@ -2,7 +2,7 @@ import json
 import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
-from typing import Dict, List, Tuple, Optional, Any
+from typing import Dict, List, Tuple, Optional, Any, Callable
 from langsmith import traceable, get_current_run_tree
 from chalicelib.indexers.indexer_factory import IndexerFactory
 from chalicelib.core.performance_timer import measure_execution_time
@@ -54,6 +54,7 @@ class Chat:
         chat_history: List[Dict[str, str]],
         socket_id: str,
         request_id: Optional[str] = None,
+        **kwargs,
     ) -> Tuple[str, List[ChatMessage], Dict[str, Any]]:
 
         # Convert dict chat history to ChatMessage objects if needed
@@ -129,8 +130,12 @@ class Chat:
                 rewritten_query=rewritten_prompt,
             )
 
-            # Generate response
-            response = self._generate_response(chat_history=updated_chat_history)
+            # Generate response (with optional streaming callback)
+            streaming_callback = kwargs.get("streaming_callback")
+            response = self._generate_response(
+                chat_history=updated_chat_history,
+                streaming_callback=streaming_callback,
+            )
 
             # Prepare evaluation metadata
             eval_metadata = {
@@ -303,10 +308,20 @@ class Chat:
         return chat_history
 
     @measure_execution_time
-    def _generate_response(self, chat_history: List[ChatMessage]) -> str:
-        response = self.llm.chat(messages=chat_history)
-        # logger.info(f"Response: {response}")
-        return response
+    def _generate_response(
+        self,
+        chat_history: List[ChatMessage],
+        streaming_callback: Optional[Callable[[str], None]] = None,
+    ) -> str:
+        if streaming_callback:
+            full_response = ""
+            for chunk in self.llm.stream_chat(messages=chat_history):
+                full_response += chunk
+                streaming_callback(chunk)
+            return full_response
+        else:
+            response = self.llm.chat(messages=chat_history)
+            return response
 
     def _prepare_results_for_metrics(
         self, results: List[SearchResult]
