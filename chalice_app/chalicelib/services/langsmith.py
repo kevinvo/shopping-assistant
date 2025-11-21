@@ -1,12 +1,15 @@
 """LangSmith dataset logging for customer queries."""
 
 import logging
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from langsmith import Client
 
 from chalicelib.core.config import config
+
+# UTC constant for Python 3.10 compatibility
+UTC = timezone.utc
 
 
 logger = logging.getLogger()

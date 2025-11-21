@@ -142,8 +142,14 @@ treat it as a new topic and focus exclusively on that. Return ONLY the rewritten
 """.strip()
 
 HYDE_GENERATION_PROMPT = """
-Given this shopping question, write a brief hypothetical answer with key product recommendations and main points.
-Focus on specific products, features, and practical advice that would be in a Reddit discussion.
+Given this shopping question, write a brief, consistent hypothetical answer that focuses on key product recommendations and main points.
+
+IMPORTANT: Be consistent and deterministic. For the same question, generate similar answers focusing on:
+1. The most relevant product categories/types mentioned in the question
+2. Key features or attributes that would be important for this type of product
+3. Practical considerations or use cases
+
+Keep it concise (2-3 sentences max). Focus on what would be most relevant for searching Reddit discussions.
 
 Question: {query}
 
@@ -151,9 +157,11 @@ Hypothetical Answer:
 """.strip()
 
 HYDE_SYSTEM_PROMPT = """
-You are a shopping assistant. Generate concise hypothetical answers to shopping questions.
-Write as if from a Reddit discussion with product recommendations, key features, and practical advice.
-Be brief but informative - focus on the most important points only.
+You are a shopping assistant generating hypothetical answers for search purposes. 
+Generate concise, consistent, and deterministic hypothetical answers to shopping questions.
+Write as if summarizing key points from a Reddit discussion - focus on product types, key features, and practical advice.
+Be brief (2-3 sentences), informative, and consistent - for the same question, generate similar answers.
+Focus on terms and concepts that would help find relevant Reddit discussions.
 """.strip()
 
 
@@ -206,14 +214,17 @@ class BaseLLM(ABC):
     TASK 1 - Rewrite the query:
     {PROMPT_REWRITE_INSTRUCTION.format(query=last_message_content)}
 
-    TASK 2 - Generate HyDE:
-    After rewriting the query, use the rewritten query to generate a hypothetical answer.
+    TASK 2 - Generate HyDE (Hypothetical Document Embedding):
+    After rewriting the query, use the rewritten query to generate a brief, consistent hypothetical answer.
+    IMPORTANT: Keep the HyDE response concise (2-3 sentences), focused on product types and key features mentioned in the rewritten query.
+    Be deterministic - similar queries should generate similar HyDE responses.
+    
     {HYDE_GENERATION_PROMPT.format(query="[USE YOUR REWRITTEN QUERY FROM TASK 1]")}
 
     Return a JSON object with both results:
     {{
       "rewritten_query": "your rewritten query here",
-      "hyde_response": "your hypothetical answer here"
+      "hyde_response": "your brief hypothetical answer here (2-3 sentences max)"
     }}
     """
 
@@ -229,8 +240,8 @@ class BaseLLM(ABC):
 
         response = self.chat(
             messages=message_history_copy,
-            temperature=0.4,
-            max_tokens=700,
+            temperature=0.2,  # Lower temperature for more consistency
+            max_tokens=500,  # Reduced tokens to encourage brevity and consistency
             json_mode=True,
         )
 

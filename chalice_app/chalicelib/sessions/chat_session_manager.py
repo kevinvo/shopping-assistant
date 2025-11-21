@@ -108,6 +108,15 @@ class Chat:
                 results1=search_results, results2=search_results_from_hype
             )
 
+            if len(search_results) == 0 and len(search_results_from_hype) == 0:
+                logger.warning(
+                    f"Both searches returned zero results for query: {query[:50]}..."
+                )
+            elif len(combined_results) == 0:
+                logger.warning(
+                    "Combined results is zero despite individual searches returning results"
+                )
+
             # Store pre-rerank results for retrieval metrics
             pre_rerank_results = self._prepare_results_for_metrics(
                 results=combined_results
@@ -142,6 +151,8 @@ class Chat:
                 "chat_history_length": len(chat_history),
                 "rewritten_query": rewritten_prompt,
                 "hyde_query": hype_response_query,
+                "num_rewritten_results": len(search_results),
+                "num_hyde_results": len(search_results_from_hype),
                 "num_combined_results": len(combined_results),
                 "num_reranked_results": len(reranked_results),
                 "top_results": [
@@ -261,6 +272,10 @@ class Chat:
 
     @measure_execution_time
     def _build_context(self, search_results: List[SearchResult]) -> str:
+        if not search_results:
+            logger.warning("No search results available for context building")
+            return "No relevant information found."
+
         context = "Here are some relevant Reddit discussions and recommendations:\n\n"
         for result in search_results[:3]:
             cleaned_text = json.dumps(result.text)[1:-1]
@@ -268,6 +283,7 @@ class Chat:
 
         # Add a clear instruction about how to use this context
         context += "\nPlease focus on answering the user's current question directly using this information. Prioritize addressing their specific query rather than summarizing previous exchanges."
+
         return context
 
     @measure_execution_time
