@@ -8,8 +8,8 @@ PYTHON_FILES := $(shell find $(PYTHON_DIRS) -name "*.py" -not -path "*/venv/*" -
 help:
 	@echo "Available targets:"
 	@echo "  make quality      - Run all quality checks (format, lint, type-check, security, test, syntax)"
-	@echo "  make format       - Format code with Black"
-	@echo "  make format-check - Check code formatting without modifying files"
+	@echo "  make format       - Format code with Black and Ruff"
+	@echo "  make format-check - Check code formatting without modifying files (Black and Ruff)"
 	@echo "  make lint         - Run Ruff linter"
 	@echo "  make lint-fix     - Run Ruff linter and auto-fix issues"
 	@echo "  make type-check   - Run MyPy type checker"
@@ -25,15 +25,19 @@ quality: format lint type-check security test syntax-check
 	@echo ""
 	@echo "✅ All quality checks passed!"
 
-# Format code with Black
+# Format code with Black and Ruff
 format:
 	@echo "🔧 Formatting code with Black..."
 	black $(PYTHON_DIRS)
+	@echo "🔧 Formatting code with Ruff..."
+	ruff format $(PYTHON_DIRS)
 
 # Check code formatting without modifying files
 format-check:
 	@echo "🔍 Checking code formatting with Black..."
 	black --check $(PYTHON_DIRS)
+	@echo "🔍 Checking code formatting with Ruff..."
+	ruff format --check $(PYTHON_DIRS)
 
 # Run Ruff linter
 lint:

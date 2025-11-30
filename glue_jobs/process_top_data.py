@@ -199,9 +199,7 @@ merged_df.write.mode("overwrite").option("path", output_s3_path).option(
     "database", GLUE_DATABASE_NAME
 ).option("tableName", GLUE_TABLE_NAME).partitionBy(
     "created_at_year", "created_at_month", "created_at_day", "subreddit_name"
-).format(
-    "parquet"
-).save()
+).format("parquet").save()
 logger.info("Data successfully written to S3")
 
 # Stop the Spark context

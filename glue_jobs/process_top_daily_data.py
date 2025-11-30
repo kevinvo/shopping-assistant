@@ -273,9 +273,7 @@ deduplicated_df.write.mode("overwrite").option(
     "tableName", GLUE_TABLE_NAME
 ).partitionBy(
     "created_at_year", "created_at_month", "created_at_day", "subreddit_name"
-).format(
-    "parquet"
-).save()
+).format("parquet").save()
 
 # Stop the Spark context
 logger.info("Stopping Spark context")
