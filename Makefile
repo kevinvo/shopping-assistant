@@ -1,15 +1,21 @@
+.ONESHELL:
+SHELL := /bin/bash
+
 .PHONY: help quality format format-check lint lint-fix type-check security test test-cov syntax-check install-dev clean
 
 # Directories to check
 PYTHON_DIRS := chalice_app/ cdk_infrastructure/ glue_jobs/
 PYTHON_FILES := $(shell find $(PYTHON_DIRS) -name "*.py" -not -path "*/venv/*" -not -path "*/.venv/*" -not -path "*/__pycache__/*" -not -path "*/layer/*" -not -path "*/cdk.out/*" -not -path "*/node_modules/*")
 
+# Activate virtual environment if it exists
+ACTIVATE_VENV := if [ -f .venv/bin/activate ]; then source .venv/bin/activate; fi;
+
 # Default target
 help:
 	@echo "Available targets:"
 	@echo "  make quality      - Run all quality checks (format, lint, type-check, security, test, syntax)"
-	@echo "  make format       - Format code with Black and Ruff"
-	@echo "  make format-check - Check code formatting without modifying files (Black and Ruff)"
+	@echo "  make format       - Format code with Black"
+	@echo "  make format-check - Check code formatting without modifying files (Black)"
 	@echo "  make lint         - Run Ruff linter"
 	@echo "  make lint-fix     - Run Ruff linter and auto-fix issues"
 	@echo "  make type-check   - Run MyPy type checker"
@@ -25,61 +31,67 @@ quality: format lint type-check security test syntax-check
 	@echo ""
 	@echo "✅ All quality checks passed!"
 
-# Format code with Black and Ruff
+# Format code with Black
 format:
-	@echo "🔧 Formatting code with Black..."
+	@$(ACTIVATE_VENV) \
+	echo "🔧 Formatting code with Black..." && \
 	black $(PYTHON_DIRS)
-	@echo "🔧 Formatting code with Ruff..."
-	ruff format $(PYTHON_DIRS)
 
 # Check code formatting without modifying files
 format-check:
-	@echo "🔍 Checking code formatting with Black..."
+	@$(ACTIVATE_VENV) \
+	echo "🔍 Checking code formatting with Black..." && \
 	black --check $(PYTHON_DIRS)
-	@echo "🔍 Checking code formatting with Ruff..."
-	ruff format --check $(PYTHON_DIRS)
 
 # Run Ruff linter
 lint:
-	@echo "🔍 Running Ruff linter..."
+	@$(ACTIVATE_VENV) \
+	echo "🔍 Running Ruff linter..." && \
 	ruff check $(PYTHON_DIRS)
 
 # Run Ruff linter and auto-fix issues
 lint-fix:
-	@echo "🔧 Running Ruff linter with auto-fix..."
+	@$(ACTIVATE_VENV) \
+	echo "🔧 Running Ruff linter with auto-fix..." && \
 	ruff check --fix $(PYTHON_DIRS)
 
 # Run MyPy type checker
 type-check:
-	@echo "🔍 Running MyPy type checker..."
+	@$(ACTIVATE_VENV) \
+	echo "🔍 Running MyPy type checker..." && \
 	mypy $(PYTHON_DIRS) || echo "⚠️  MyPy found type issues (non-blocking)"
 
 # Run Bandit security checker
 security:
-	@echo "🔍 Running Bandit security checker..."
+	@$(ACTIVATE_VENV) \
+	echo "🔍 Running Bandit security checker..." && \
 	bandit -r $(PYTHON_DIRS) -ll
 
 # Run pytest tests
 test:
-	@echo "🧪 Running pytest tests..."
+	@$(ACTIVATE_VENV) \
+	echo "🧪 Running pytest tests..." && \
 	pytest -v --tb=short chalice_app/tests
 
 # Run pytest tests with coverage
 test-cov:
-	@echo "🧪 Running pytest tests with coverage..."
+	@$(ACTIVATE_VENV) \
+	echo "🧪 Running pytest tests with coverage..." && \
 	pytest -v --tb=short --cov=chalice_app --cov-report=term-missing chalice_app/tests
 
 # Check Python syntax
 syntax-check:
-	@echo "🔍 Checking Python syntax..."
-	@python -m py_compile $(PYTHON_FILES) || (echo "❌ Syntax errors found!" && exit 1)
-	@echo "✅ All Python files have valid syntax"
+	@$(ACTIVATE_VENV) \
+	echo "🔍 Checking Python syntax..." && \
+	python -m py_compile $(PYTHON_FILES) || (echo "❌ Syntax errors found!" && exit 1) && \
+	echo "✅ All Python files have valid syntax"
 
 # Install development dependencies
 install-dev:
-	@echo "📦 Installing development dependencies..."
-	pip install --upgrade pip
-	pip install -r requirements_dev.txt
+	@$(ACTIVATE_VENV) \
+	echo "📦 Installing development dependencies..." && \
+	pip install --upgrade pip && \
+	pip install -r requirements_dev.txt && \
 	pip install -r requirements.txt
 
 # Clean Python cache files
