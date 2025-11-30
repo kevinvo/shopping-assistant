@@ -140,10 +140,10 @@ class RedditScraper:
 
                 logger.info(f"Fetching comments for {len(top_posts)} posts")
 
-                comments_data: Dict[str, List[RedditComment]] = (
-                    self._batch_fetch_comments(
-                        posts=merged_posts, comment_limit=limit_comments
-                    )
+                comments_data: Dict[
+                    str, List[RedditComment]
+                ] = self._batch_fetch_comments(
+                    posts=merged_posts, comment_limit=limit_comments
                 )
                 reddit_posts: List[RedditPost] = [
                     self._process_post(

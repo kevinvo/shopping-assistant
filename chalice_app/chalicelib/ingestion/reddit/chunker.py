@@ -45,9 +45,9 @@ class RedditChunker:
             chunk_size=chunk_size, chunk_overlap=chunk_overlap
         )
         if semantic_chunker is not None:
-            self._semantic_chunker: Optional[Callable[[str], List[str]]] = (
-                semantic_chunker
-            )
+            self._semantic_chunker: Optional[
+                Callable[[str], List[str]]
+            ] = semantic_chunker
         else:
             self._semantic_chunker = _build_semchunk_chunker(
                 chunk_size=chunk_size,

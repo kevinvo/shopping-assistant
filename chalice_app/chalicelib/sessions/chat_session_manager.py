@@ -56,7 +56,6 @@ class Chat:
         request_id: Optional[str] = None,
         **kwargs,
     ) -> Tuple[str, List[ChatMessage], Dict[str, Any]]:
-
         # Convert dict chat history to ChatMessage objects if needed
         chat_messages = [
             ChatMessage.from_dict(msg) if not isinstance(msg, ChatMessage) else msg

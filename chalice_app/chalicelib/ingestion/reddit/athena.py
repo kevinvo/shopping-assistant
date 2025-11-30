@@ -45,7 +45,6 @@ class AthenaQueryExecutor:
     def fetch_all_data(
         self, where_clause: str = "", total_size: Optional[int] = None
     ) -> Generator[List[RedditPost], None, None]:
-
         count = 0
         total_size_per_reddit_post = min(
             [x for x in [total_size, self.page_size] if x is not None]

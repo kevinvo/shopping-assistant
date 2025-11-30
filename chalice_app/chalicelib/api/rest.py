@@ -46,13 +46,13 @@ def create_response_with_cookie(
         is_localhost = origin and origin.startswith("http://localhost")
 
         if is_localhost:
-            headers["Set-Cookie"] = (
-                f"session_id={session_id}; Path=/; HttpOnly; SameSite=Lax"
-            )
+            headers[
+                "Set-Cookie"
+            ] = f"session_id={session_id}; Path=/; HttpOnly; SameSite=Lax"
         else:
-            headers["Set-Cookie"] = (
-                f"session_id={session_id}; Path=/; HttpOnly; Secure; SameSite=None"
-            )
+            headers[
+                "Set-Cookie"
+            ] = f"session_id={session_id}; Path=/; HttpOnly; Secure; SameSite=None"
 
     logger.info("Response headers: %s", headers)
     return Response(body=body, status_code=200, headers=headers)

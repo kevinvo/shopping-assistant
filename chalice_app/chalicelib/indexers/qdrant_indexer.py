@@ -86,7 +86,6 @@ class QdrantIndexer:
             raise
 
     def index_documents(self, docs: List[Document]) -> None:
-
         texts: List[str] = [doc.page_content for doc in docs]
         doc_ids = [
             str(
@@ -171,7 +170,6 @@ class QdrantIndexer:
             )
 
         try:
-
             self.client.upsert(
                 collection_name=self.collection_name,
                 points=points,

@@ -85,7 +85,6 @@ class SessionHandler:
         session_data: Optional[SessionData],
         session_id: Optional[str],
     ) -> Tuple[SessionData, ApiResponse, Optional[str]]:
-
         log_session_event(
             "VALIDATION_START",
             {"session_id": session_id, "has_session_data": bool(session_data)},
