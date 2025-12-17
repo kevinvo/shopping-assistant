@@ -4,7 +4,7 @@ Main entry point for Chalice application.
 This module initializes the Chalice app and registers all handlers.
 """
 
-from chalice import Chalice, Cron, Rate  # type: ignore[import]
+from chalice import Chalice, Rate  # type: ignore[import]
 import logging
 import json
 import os
