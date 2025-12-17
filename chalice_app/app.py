@@ -211,10 +211,15 @@ def evaluator(event):
         raise
 
 
-@app.schedule(Cron(0, 2, "*", "*", "?", "*"))
+# DISABLED: Scheduled data ingestion disabled to reduce costs
+# @app.schedule(Cron(0, 2, "*", "*", "?", "*"))
 @notify_on_exception
 def scraper(event):
-    """Scraper Trigger (Step Functions): runs at 2:00 AM UTC and launches the workflow."""
+    """Scraper Trigger (Step Functions): runs at 2:00 AM UTC and launches the workflow.
+
+    DISABLED: This scheduled task has been disabled to reduce AWS costs.
+    To re-enable, uncomment the @app.schedule decorator above.
+    """
     try:
         if not SCRAPER_STATE_MACHINE_ARN:
             raise RuntimeError(
@@ -248,11 +253,15 @@ def scraper(event):
         raise
 
 
-@app.schedule(Cron(0, 3, "*", "*", "?", "*"))
+# DISABLED: Scheduled data ingestion disabled to reduce costs
+# @app.schedule(Cron(0, 3, "*", "*", "?", "*"))
 @notify_on_exception
 def indexer(event):
     """
     Daily Reddit data indexer - runs at midnight UTC
+
+    DISABLED: This scheduled task has been disabled to reduce AWS costs.
+    To re-enable, uncomment the @app.schedule decorator above.
     """
     try:
         logger.info("Starting daily Reddit indexing job")
@@ -267,7 +276,8 @@ def indexer(event):
         raise
 
 
-@app.schedule(Cron(0, 0, "*", "*", "?", "*"))
+# DISABLED: Scheduled data ingestion disabled to reduce costs
+# @app.schedule(Cron(0, 0, "*", "*", "?", "*"))
 @notify_on_exception
 def glue_starter(event):
     """
@@ -275,6 +285,9 @@ def glue_starter(event):
 
     Starts the Glue job for processing Reddit data.
     Now runs directly in Chalice.
+
+    DISABLED: This scheduled task has been disabled to reduce AWS costs.
+    To re-enable, uncomment the @app.schedule decorator above.
     """
     try:
         logger.info("Starting daily Glue job")
