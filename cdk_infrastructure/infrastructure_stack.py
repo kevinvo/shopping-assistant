@@ -188,8 +188,9 @@ class ShoppingAssistantInfrastructureStack(Stack):
             id="RedditPostsTest",
         )
 
-        self.create_glue_job()
-        self.create_process_top_data_glue_job()
+        # DISABLED: Glue jobs disabled to reduce AWS costs
+        # self.create_glue_job()
+        # self.create_process_top_data_glue_job()
 
         # Create Step Functions workflows for the Chalice-managed scraper Lambdas
         self.create_scraper_state_machines()
