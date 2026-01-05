@@ -377,8 +377,7 @@ class ShoppingAssistantInfrastructureStack(Stack):
                     {"path": f"s3://{self.raw_data_bucket.bucket_name}/top_posts"}
                 ]
             },
-            # DISABLED: Schedule removed to reduce costs - crawler can still be run manually
-            # schedule={"scheduleExpression": "cron(0 1 * * ? *)"},
+            schedule={"scheduleExpression": ""},  # Explicitly disabled to reduce costs
         )
 
         # Output the name of the Glue Crawler
@@ -413,8 +412,7 @@ class ShoppingAssistantInfrastructureStack(Stack):
                     {"path": f"s3://{self.processed_data_bucket.bucket_name}/"}
                 ]
             },
-            # DISABLED: Schedule removed to reduce costs - crawler can still be run manually
-            # schedule={"scheduleExpression": "cron(0 2 * * ? *)"},
+            schedule={"scheduleExpression": ""},  # Explicitly disabled to reduce costs
         )
 
         # Output the name of the Processed Data Glue Crawler
