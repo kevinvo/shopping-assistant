@@ -5,7 +5,6 @@ from typing import Any, Dict, List
 from langchain.schema import Document
 from langchain_openai import OpenAIEmbeddings
 from pydantic import SecretStr
-from rank_bm25 import BM25Okapi
 from weaviate.auth import AuthApiKey
 from weaviate.client import Client
 
@@ -55,16 +54,8 @@ class WeaviateIndexer:
         # Generate dense embeddings
         dense_embeddings: List[List[float]] = self.embeddings.embed_documents(texts)
 
-        # Generate sparse embeddings with BM25
-        tokenized_texts = [text.lower().split() for text in texts]
-        bm25 = BM25Okapi(tokenized_texts)
-        sparse_vectors = []
-
-        for doc in tokenized_texts:
-            # Get BM25 scores for all terms
-            scores = bm25.get_scores(doc)
-            # Convert scores to list of floats
-            sparse_vectors.append([float(score) for score in scores])
+        # Note: Weaviate's hybrid search handles BM25 internally via with_hybrid()
+        # so we don't need to generate sparse vectors manually
 
         # Create documents
         documents = [
@@ -72,11 +63,10 @@ class WeaviateIndexer:
                 "id": doc_id,
                 "text": text,
                 "vector": dense_emb,
-                "sparse_vector": sparse_vec,
                 "metadata": doc.metadata,
             }
-            for doc_id, text, dense_emb, sparse_vec, doc in zip(
-                doc_ids, texts, dense_embeddings, sparse_vectors, docs
+            for doc_id, text, dense_emb, doc in zip(
+                doc_ids, texts, dense_embeddings, docs
             )
         ]
 
@@ -86,7 +76,6 @@ class WeaviateIndexer:
                 properties = {
                     "text": doc["text"],
                     "metadata": doc["metadata"],
-                    "sparse_vector": doc["sparse_vector"],
                 }
 
                 batch.add_data_object(

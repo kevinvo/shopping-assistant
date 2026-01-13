@@ -11,8 +11,134 @@ import uuid
 from chalicelib.core.performance_timer import measure_execution_time
 from pydantic import SecretStr
 import math
+import re
 
 logger = setup_logger(__name__)
+
+# Common English stopwords to filter out
+STOPWORDS = frozenset(
+    [
+        "a",
+        "an",
+        "the",
+        "and",
+        "or",
+        "but",
+        "in",
+        "on",
+        "at",
+        "to",
+        "for",
+        "of",
+        "with",
+        "by",
+        "from",
+        "as",
+        "is",
+        "was",
+        "are",
+        "were",
+        "been",
+        "be",
+        "have",
+        "has",
+        "had",
+        "do",
+        "does",
+        "did",
+        "will",
+        "would",
+        "could",
+        "should",
+        "may",
+        "might",
+        "must",
+        "shall",
+        "can",
+        "need",
+        "dare",
+        "ought",
+        "used",
+        "it",
+        "its",
+        "this",
+        "that",
+        "these",
+        "those",
+        "i",
+        "you",
+        "he",
+        "she",
+        "we",
+        "they",
+        "what",
+        "which",
+        "who",
+        "whom",
+        "their",
+        "my",
+        "your",
+        "his",
+        "her",
+        "our",
+        "not",
+        "no",
+        "nor",
+        "so",
+        "if",
+        "then",
+        "else",
+        "when",
+        "where",
+        "why",
+        "how",
+        "all",
+        "each",
+        "every",
+        "both",
+        "few",
+        "more",
+        "most",
+        "other",
+        "some",
+        "such",
+        "any",
+        "only",
+        "own",
+        "same",
+        "than",
+        "too",
+        "very",
+        "just",
+        "also",
+        "now",
+        "here",
+        "there",
+        "about",
+        "into",
+        "through",
+        "during",
+        "before",
+        "after",
+        "above",
+        "below",
+        "between",
+        "under",
+        "again",
+        "further",
+        "once",
+        "up",
+        "down",
+        "out",
+        "off",
+        "over",
+        "am",
+        "being",
+        "because",
+        "until",
+        "while",
+    ]
+)
 
 
 @dataclass
@@ -38,6 +164,13 @@ class QdrantIndexer:
         # This will be populated when documents are indexed
         self._vocabulary_indices: Dict[str, int] = {}
         self._idf: Dict[str, float] = {}
+
+    def _tokenize(self, text: str) -> List[str]:
+        """Tokenize text with punctuation removal and stopword filtering."""
+        # Convert to lowercase and extract alphanumeric tokens
+        tokens = re.findall(r"\b[a-z0-9]+\b", text.lower())
+        # Filter out stopwords and very short tokens
+        return [t for t in tokens if t not in STOPWORDS and len(t) > 1]
 
     def delete_index(self) -> None:
         """Delete the Qdrant collection if it exists."""
@@ -71,9 +204,10 @@ class QdrantIndexer:
                             size=1536,
                             distance=models.Distance.COSINE,
                         ),
-                        "sparse": models.VectorParams(
-                            size=30,
-                            distance=models.Distance.DOT,
+                    },
+                    sparse_vectors_config={
+                        "sparse": models.SparseVectorParams(
+                            modifier=models.Modifier.IDF,
                         ),
                     },
                 )
@@ -101,51 +235,49 @@ class QdrantIndexer:
         dense_embeddings: List[List[float]] = self.embeddings.embed_documents(texts)
 
         # Build vocabulary and compute IDF for term-based sparse vectors
-        tokenized_texts = [text.lower().split() for text in texts]
+        tokenized_texts = [self._tokenize(text) for text in texts]
 
         # Build vocabulary: get all unique terms across all documents
         vocabulary: Set[str] = set()
         for tokens in tokenized_texts:
             vocabulary.update(tokens)
-        vocabulary_list = sorted(list(vocabulary))  # Sort for consistent ordering
 
-        # Limit vocabulary to top terms by document frequency (for 30-dim sparse vector)
-        doc_freq = Counter()
+        # Create vocabulary index mapping (all unique terms, sorted for consistency)
+        vocabulary_list = sorted(list(vocabulary))
+        vocabulary_indices = {term: idx for idx, term in enumerate(vocabulary_list)}
+
+        # Compute document frequency for each term
+        doc_freq: Dict[str, int] = {}
         for tokens in tokenized_texts:
-            doc_freq.update(set(tokens))
+            for term in set(tokens):
+                doc_freq[term] = doc_freq.get(term, 0) + 1
 
-        # Get top 30 terms by document frequency (most common terms)
-        top_terms = [term for term, _ in doc_freq.most_common(30)]
-        if len(top_terms) < 30:
-            # If we have fewer than 30 unique terms, pad with remaining vocabulary
-            remaining = [t for t in vocabulary_list if t not in top_terms]
-            top_terms.extend(remaining[: 30 - len(top_terms)])
-        vocabulary_indices = {term: idx for idx, term in enumerate(top_terms[:30])}
-
-        # Compute IDF for each term
+        # Compute IDF for each term using standard formula
         num_docs = len(tokenized_texts)
-        idf = {}
-        for term in vocabulary_indices.keys():
-            df = sum(1 for tokens in tokenized_texts if term in tokens)
-            idf[term] = math.log((num_docs - df + 0.5) / (df + 0.5) + 1.0)
+        idf: Dict[str, float] = {}
+        for term, df in doc_freq.items():
+            idf[term] = math.log((num_docs + 1) / (df + 1)) + 1.0
 
         # Generate sparse vectors for each document using TF-IDF
-        sparse_vectors = []
+        # Using proper SparseVector format with indices and values
+        sparse_vectors: List[models.SparseVector] = []
         for tokens in tokenized_texts:
-            # Compute term frequencies
             term_freq = Counter(tokens)
             doc_length = len(tokens)
 
-            # Build sparse vector: TF-IDF for each term in vocabulary
-            sparse_vec = [0.0] * 30
-            for term, idx in vocabulary_indices.items():
-                if term in term_freq:
-                    # TF (term frequency) normalized by document length
-                    tf = term_freq[term] / doc_length
-                    # TF-IDF score
-                    sparse_vec[idx] = float(tf * idf[term])
+            indices: List[int] = []
+            values: List[float] = []
 
-            sparse_vectors.append(sparse_vec)
+            for term, count in term_freq.items():
+                if term in vocabulary_indices:
+                    idx = vocabulary_indices[term]
+                    # TF normalized by document length, multiplied by IDF
+                    tf = count / doc_length
+                    tfidf_score = tf * idf[term]
+                    indices.append(idx)
+                    values.append(float(tfidf_score))
+
+            sparse_vectors.append(models.SparseVector(indices=indices, values=values))
 
         # Store vocabulary and IDF for query-time use
         self._vocabulary_indices = vocabulary_indices
@@ -179,52 +311,214 @@ class QdrantIndexer:
             logger.error(f"Error indexing documents: {e}")
             raise
 
+    def rebuild_sparse_vectors_only(self) -> None:
+        """
+        Rebuild only sparse vectors without regenerating dense embeddings.
+        This fetches existing documents, regenerates sparse vectors, and re-uploads.
+        Skips OpenAI API calls entirely - costs $0.
+        """
+        logger.info("Starting sparse vector rebuild (preserving dense vectors)...")
+
+        # Step 1: Fetch all existing points with vectors and payloads
+        all_points = []
+        offset = None
+
+        while True:
+            scroll_result = self.client.scroll(
+                collection_name=self.collection_name,
+                limit=1000,
+                offset=offset,
+                with_payload=True,
+                with_vectors=True,
+            )
+
+            points, next_offset = scroll_result
+            all_points.extend(points)
+            logger.info(f"Fetched {len(all_points)} points so far...")
+
+            if next_offset is None or len(points) == 0:
+                break
+            offset = next_offset
+
+        if not all_points:
+            logger.warning("No documents found in collection")
+            return
+
+        logger.info(f"Total points fetched: {len(all_points)}")
+
+        # Step 2: Extract texts and build vocabulary
+        texts = []
+        for point in all_points:
+            if point.payload and point.payload.get("text"):
+                texts.append(point.payload["text"])
+            else:
+                texts.append("")
+
+        tokenized_texts = [self._tokenize(text) for text in texts]
+
+        # Build vocabulary from all documents
+        vocabulary: Set[str] = set()
+        for tokens in tokenized_texts:
+            vocabulary.update(tokens)
+
+        vocabulary_list = sorted(list(vocabulary))
+        vocabulary_indices = {term: idx for idx, term in enumerate(vocabulary_list)}
+
+        # Compute document frequency and IDF
+        doc_freq: Dict[str, int] = {}
+        for tokens in tokenized_texts:
+            for term in set(tokens):
+                doc_freq[term] = doc_freq.get(term, 0) + 1
+
+        num_docs = len(tokenized_texts)
+        idf: Dict[str, float] = {}
+        for term, df in doc_freq.items():
+            idf[term] = math.log((num_docs + 1) / (df + 1)) + 1.0
+
+        # Store for query-time use
+        self._vocabulary_indices = vocabulary_indices
+        self._idf = idf
+
+        logger.info(f"Built vocabulary with {len(vocabulary_indices)} terms")
+
+        # Step 3: Delete and recreate collection with correct sparse config
+        logger.info("Recreating collection with correct sparse vector config...")
+        self.client.delete_collection(self.collection_name)
+        self.create_index()
+
+        # Step 4: Generate new sparse vectors and re-upload with existing dense vectors
+        new_points = []
+        for i, (point, tokens) in enumerate(zip(all_points, tokenized_texts)):
+            # Get existing dense vector
+            dense_vector = (
+                point.vector.get("dense")
+                if isinstance(point.vector, dict)
+                else point.vector
+            )
+
+            # Generate new sparse vector
+            term_freq = Counter(tokens)
+            doc_length = len(tokens) if tokens else 1
+
+            indices: List[int] = []
+            values: List[float] = []
+
+            for term, count in term_freq.items():
+                if term in vocabulary_indices:
+                    idx = vocabulary_indices[term]
+                    tf = count / doc_length
+                    tfidf_score = tf * idf[term]
+                    indices.append(idx)
+                    values.append(float(tfidf_score))
+
+            sparse_vector = models.SparseVector(indices=indices, values=values)
+
+            new_points.append(
+                models.PointStruct(
+                    id=point.id,
+                    vector={
+                        "dense": dense_vector,
+                        "sparse": sparse_vector,
+                    },
+                    payload=point.payload,
+                )
+            )
+
+            # Batch upsert every 500 points
+            if len(new_points) >= 500:
+                self.client.upsert(
+                    collection_name=self.collection_name,
+                    points=new_points,
+                )
+                logger.info(f"Uploaded {i + 1}/{len(all_points)} points")
+                new_points = []
+
+        # Upload remaining points
+        if new_points:
+            self.client.upsert(
+                collection_name=self.collection_name,
+                points=new_points,
+            )
+
+        logger.info(
+            f"Sparse vector rebuild complete. Processed {len(all_points)} documents."
+        )
+
+    def _generate_query_sparse_vector(self, query: str) -> models.SparseVector:
+        """Generate a sparse vector for the query using stored vocabulary and IDF."""
+        if not self._vocabulary_indices or not self._idf:
+            self._rebuild_vocabulary_from_collection()
+
+        tokens = self._tokenize(query)
+        term_freq = Counter(tokens)
+        query_length = len(tokens)
+
+        indices: List[int] = []
+        values: List[float] = []
+
+        for term, count in term_freq.items():
+            if term in self._vocabulary_indices and term in self._idf:
+                idx = self._vocabulary_indices[term]
+                tf = count / query_length
+                tfidf_score = tf * self._idf[term]
+                indices.append(idx)
+                values.append(float(tfidf_score))
+
+        return models.SparseVector(indices=indices, values=values)
+
     def _rebuild_vocabulary_from_collection(self) -> None:
         """Rebuild vocabulary and IDF from existing documents in the collection."""
         try:
-            # Retrieve a sample of documents to build vocabulary
-            # We'll use scroll to get all documents, but limit to reasonable number
-            scroll_result = self.client.scroll(
-                collection_name=self.collection_name,
-                limit=1000,  # Sample up to 1000 documents
-                with_payload=True,
-                with_vectors=False,
-            )
-
+            # Retrieve documents using pagination for larger collections
             texts = []
-            for point in scroll_result[0]:
-                if point.payload and point.payload.get("text"):
-                    texts.append(point.payload["text"])
+            offset = None
+            max_docs = 10000  # Increased from 1000 for better vocabulary coverage
+
+            while len(texts) < max_docs:
+                scroll_result = self.client.scroll(
+                    collection_name=self.collection_name,
+                    limit=1000,
+                    offset=offset,
+                    with_payload=True,
+                    with_vectors=False,
+                )
+
+                points, next_offset = scroll_result
+                for point in points:
+                    if point.payload and point.payload.get("text"):
+                        texts.append(point.payload["text"])
+
+                if next_offset is None or len(points) == 0:
+                    break
+                offset = next_offset
 
             if not texts:
                 logger.warning("No documents found in collection to rebuild vocabulary")
                 return
 
             # Build vocabulary from retrieved documents
-            tokenized_texts = [text.lower().split() for text in texts]
+            tokenized_texts = [self._tokenize(text) for text in texts]
             vocabulary: Set[str] = set()
             for tokens in tokenized_texts:
                 vocabulary.update(tokens)
 
-            doc_freq = Counter()
-            for tokens in tokenized_texts:
-                doc_freq.update(set(tokens))
-
-            top_terms = [term for term, _ in doc_freq.most_common(30)]
+            # Create vocabulary index mapping (sorted for consistency)
             vocabulary_list = sorted(list(vocabulary))
-            if len(top_terms) < 30:
-                remaining = [t for t in vocabulary_list if t not in top_terms]
-                top_terms.extend(remaining[: 30 - len(top_terms)])
-
             self._vocabulary_indices = {
-                term: idx for idx, term in enumerate(top_terms[:30])
+                term: idx for idx, term in enumerate(vocabulary_list)
             }
 
+            # Compute document frequency for each term
+            doc_freq: Dict[str, int] = {}
+            for tokens in tokenized_texts:
+                for term in set(tokens):
+                    doc_freq[term] = doc_freq.get(term, 0) + 1
+
+            # Compute IDF for each term
             num_docs = len(tokenized_texts)
             self._idf = {}
-            for term in self._vocabulary_indices.keys():
-                df = sum(1 for tokens in tokenized_texts if term in tokens)
-                self._idf[term] = math.log((num_docs - df + 0.5) / (df + 0.5) + 1.0)
+            for term, df in doc_freq.items():
+                self._idf[term] = math.log((num_docs + 1) / (df + 1)) + 1.0
 
             logger.info(
                 f"Rebuilt vocabulary with {len(self._vocabulary_indices)} terms from {len(texts)} documents"
@@ -250,15 +544,10 @@ class QdrantIndexer:
         """
 
         query_embedding = self.embeddings.embed_query(query)
-
-        # Sparse search is temporarily disabled
-        # TODO: Re-enable sparse vector generation after fixing the implementation
-        # query_sparse_vector = [0.0] * 30
+        query_sparse_vector = self._generate_query_sparse_vector(query)
 
         try:
-            # Sparse search is temporarily disabled - using dense search only
-            # TODO: Re-enable sparse search after fixing sparse vector generation
-
+            # Dense search
             dense_response = self.client.query_points(
                 collection_name=self.collection_name,
                 query=query_embedding,
@@ -269,9 +558,19 @@ class QdrantIndexer:
                 score_threshold=0.0,
                 using="dense",
             )
-
             dense_results = dense_response.points
-            # Sparse search disabled - sparse_results not needed
+
+            # Sparse search
+            sparse_response = self.client.query_points(
+                collection_name=self.collection_name,
+                query=query_sparse_vector,
+                query_filter=None,
+                limit=limit,
+                with_payload=True,
+                with_vectors=False,
+                using="sparse",
+            )
+            sparse_results = sparse_response.points
 
             all_results = []
             seen_texts = set()
@@ -282,13 +581,12 @@ class QdrantIndexer:
                 all_results=all_results,
                 seen_texts=seen_texts,
             )
-            # Sparse search disabled
-            # self._add_search_results(
-            #     search_results=sparse_results,
-            #     source="sparse",
-            #     all_results=all_results,
-            #     seen_texts=seen_texts,
-            # )
+            self._add_search_results(
+                search_results=sparse_results,
+                source="sparse",
+                all_results=all_results,
+                seen_texts=seen_texts,
+            )
 
             all_results.sort(key=lambda x: x["score"], reverse=True)
             top_results = all_results[:limit]
