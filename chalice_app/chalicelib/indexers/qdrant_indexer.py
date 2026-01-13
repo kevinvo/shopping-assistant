@@ -12,6 +12,7 @@ from chalicelib.core.performance_timer import measure_execution_time
 from pydantic import SecretStr
 import math
 import re
+import time
 
 logger = setup_logger(__name__)
 
@@ -311,6 +312,21 @@ class QdrantIndexer:
             logger.error(f"Error indexing documents: {e}")
             raise
 
+    def _retry_operation(self, operation, max_retries=5, base_delay=2.0):
+        """Retry an operation with exponential backoff."""
+        for attempt in range(max_retries):
+            try:
+                return operation()
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    raise
+                delay = base_delay * (2**attempt)
+                logger.warning(
+                    f"Operation failed (attempt {attempt + 1}/{max_retries}): {e}. "
+                    f"Retrying in {delay}s..."
+                )
+                time.sleep(delay)
+
     def rebuild_sparse_vectors_only(self) -> None:
         """
         Rebuild only sparse vectors without regenerating dense embeddings.
@@ -319,22 +335,32 @@ class QdrantIndexer:
         """
         logger.info("Starting sparse vector rebuild (preserving dense vectors)...")
 
+        # Create a client with longer timeout for large data transfers
+        long_timeout_client = QdrantClient(
+            url=config.qdrant_url,
+            api_key=config.qdrant_api_key,
+            timeout=300.0,  # 5 minutes timeout
+        )
+
         # Step 1: Fetch all existing points with vectors and payloads
         all_points = []
         offset = None
 
         while True:
-            scroll_result = self.client.scroll(
-                collection_name=self.collection_name,
-                limit=1000,
-                offset=offset,
-                with_payload=True,
-                with_vectors=True,
+            scroll_result = self._retry_operation(
+                lambda: long_timeout_client.scroll(
+                    collection_name=self.collection_name,
+                    limit=100,  # Smaller batches to avoid timeout
+                    offset=offset,
+                    with_payload=True,
+                    with_vectors=True,
+                )
             )
 
             points, next_offset = scroll_result
             all_points.extend(points)
-            logger.info(f"Fetched {len(all_points)} points so far...")
+            if len(all_points) % 1000 == 0:
+                logger.info(f"Fetched {len(all_points)} points so far...")
 
             if next_offset is None or len(points) == 0:
                 break
@@ -424,20 +450,26 @@ class QdrantIndexer:
                 )
             )
 
-            # Batch upsert every 500 points
-            if len(new_points) >= 500:
-                self.client.upsert(
-                    collection_name=self.collection_name,
-                    points=new_points,
+            # Batch upsert every 100 points
+            if len(new_points) >= 100:
+                batch_to_upload = new_points.copy()
+                self._retry_operation(
+                    lambda: long_timeout_client.upsert(
+                        collection_name=self.collection_name,
+                        points=batch_to_upload,
+                    )
                 )
                 logger.info(f"Uploaded {i + 1}/{len(all_points)} points")
                 new_points = []
 
         # Upload remaining points
         if new_points:
-            self.client.upsert(
-                collection_name=self.collection_name,
-                points=new_points,
+            batch_to_upload = new_points.copy()
+            self._retry_operation(
+                lambda: long_timeout_client.upsert(
+                    collection_name=self.collection_name,
+                    points=batch_to_upload,
+                )
             )
 
         logger.info(
