@@ -403,6 +403,69 @@ shopping-assistant-agent/
 - Execution time measurement
 - CloudWatch logging
 
+## Observability & Metrics
+
+The system tracks comprehensive metrics for retrieval quality and response evaluation, all sent to [LangSmith](https://smith.langchain.com/) for real-time monitoring and analysis.
+
+### Retrieval Quality Metrics
+
+These metrics evaluate how well the RAG system retrieves relevant documents. The reranker's relevance scores (threshold ≥ 0.5) serve as pseudo ground truth.
+
+| Metric | Description |
+|--------|-------------|
+| **Recall@K** (K=5, 10, 15) | Proportion of relevant documents retrieved in top K results |
+| **nDCG@K** (K=5, 10, 15) | Normalized Discounted Cumulative Gain - measures ranking quality with position weighting |
+| **MRR** | Mean Reciprocal Rank - position of the first relevant document |
+| **Hit Rate@K** (K=5, 10, 15) | Binary indicator of whether any relevant document appears in top K |
+
+### Response Quality Metrics
+
+LLM-based evaluations assess the quality of generated responses:
+
+| Metric | Range | Description |
+|--------|-------|-------------|
+| **Faithfulness** | 0-1 | Whether the response is grounded in the provided Reddit context |
+| **Actionability** | 0-1 | How specific and actionable the product recommendations are |
+| **Retrieval Relevance** | 0-1 | How relevant the retrieved documents are to the user's query |
+| **Overall Score** | 0-1 | Weighted average: 40% Faithfulness + 35% Actionability + 25% Retrieval Relevance |
+| **Heuristic Score** | 0-1 | Fast checks: has_products, has_specifics, response_length |
+
+### Session Metrics
+
+Each chat session tracks:
+
+- **Query transformations**: `rewritten_query` (context-aware), `hyde_query` (hypothetical embeddings)
+- **Result counts**: `num_rewritten_results`, `num_hyde_results`, `num_combined_results`, `num_reranked_results`
+- **Metadata**: `chat_history_length`, `session_id`, `run_id` (LangSmith trace ID)
+
+### How Metrics Flow to LangSmith
+
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│  Chat Session   │────▶│   SQS Queue     │────▶│   Evaluator     │
+│  (@traceable)   │     │  (async eval)   │     │   Lambda        │
+└─────────────────┘     └─────────────────┘     └────────┬────────┘
+                                                         │
+                                                         ▼
+                                               ┌─────────────────┐
+                                               │    LangSmith    │
+                                               │  create_feedback│
+                                               └─────────────────┘
+```
+
+1. **Trace Capture**: The `@traceable(name="chat_session")` decorator captures each chat interaction
+2. **Async Evaluation**: Messages are queued to SQS for background evaluation
+3. **Feedback Posting**: The evaluator computes metrics and posts them via `langsmith_client.create_feedback()`
+
+### Viewing Metrics
+
+Access the LangSmith dashboard to view:
+- Individual trace details with retrieval and generation steps
+- Feedback scores (recall, faithfulness, etc.) linked to each trace
+- Aggregate metrics over time for quality monitoring
+
+Dashboard: [smith.langchain.com](https://smith.langchain.com/)
+
 ## Configuration
 
 Configuration is managed in `chalice_app/chalicelib/config.py`:
