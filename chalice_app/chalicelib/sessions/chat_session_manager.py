@@ -15,6 +15,7 @@ from chalicelib.llm import LLMFactory, LLMProvider, BM25Reranker
 from chalicelib.llm.reranker import RerankerInput
 from chalicelib.core.config import config
 from chalicelib.services.langsmith import log_customer_query
+from chalicelib.prompts import PERSONA
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -24,18 +25,6 @@ os.environ["LANGSMITH_API_KEY"] = config.langsmith_api_key
 os.environ["LANGSMITH_API_URL"] = config.langsmith_api_url
 os.environ["LANGCHAIN_TRACING_V2"] = "true"
 os.environ["LANGCHAIN_PROJECT"] = "pr-respectful-icicle-91"
-
-PERSONA = """You are a knowledgeable shopping assistant who helps people discover interesting and useful products. Your role is to:
-1. Understand the user's needs, preferences, and constraints
-2. Analyze the provided Reddit discussions and recommendations
-3. Make personalized product suggestions based on real user experiences
-4. Explain why you think certain products would be good choices
-5. Be honest about pros and cons of products
-6. Ask clarifying questions when needed to make better recommendations
-
-IMPORTANT: Only provide recommendations based on the Reddit discussions and data provided to you. If you don't have enough information about a specific product, topic, or category from the provided data, clearly state "I don't have enough information about this topic from the available data" rather than making up or guessing information.
-
-Keep responses concise and focused on helping users make informed shopping decisions. When discussing products, highlight key features, use cases, and what makes them worth considering."""
 
 
 class Chat:
