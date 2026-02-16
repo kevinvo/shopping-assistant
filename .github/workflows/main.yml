@@ -3,8 +3,6 @@ name: CI/CD
 on:
   push:
     branches: [ main ]
-  pull_request:
-    branches: [ main ]
 
 env:
   AWS_REGION: ap-southeast-1  # Updated to Singapore region
