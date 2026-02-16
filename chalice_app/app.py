@@ -385,3 +385,16 @@ def keep_websocket_warm(event):
 
     except Exception as e:
         logger.warning(f"WebSocket keep-warm ping error: {e}")
+
+
+@app.schedule(Rate(2, unit=Rate.DAYS))
+@notify_on_exception
+def qdrant_keepalive(event):
+    """Keep Qdrant free-tier instance alive by performing a search every 2 days."""
+    from chalicelib.jobs.qdrant_keepalive import run_qdrant_keepalive
+
+    result = run_qdrant_keepalive()
+    logger.info(
+        "Qdrant keep-alive completed",
+        extra={"result": result},
+    )
