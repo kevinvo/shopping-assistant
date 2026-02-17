@@ -119,85 +119,39 @@ jobs:
       run: |
         python chalice_app/scripts/deploy.py --stage chalice-test --region ${{ env.AWS_REGION }}
 
-    - name: Verify and Fix Layer Attachment
+    - name: Verify Layer Attachment
       if: github.ref == 'refs/heads/main' && github.event_name == 'push'
       working-directory: chalice_app
       run: |
-        echo "Performing final verification of layer attachment..."
+        echo "Verifying layer attachment..."
         STAGE="chalice-test"
         REGION="${{ env.AWS_REGION }}"
         LAYER_NAME="shopping-assistant-chalice-layer"
-        
-        # Get latest layer ARN
-        LAYER_ARN=$(aws lambda list-layer-versions \
-            --layer-name "$LAYER_NAME" \
-            --region "$REGION" \
-            --max-items 1 \
-            --query 'LayerVersions[0].LayerVersionArn' \
-            --output text)
-        
-        # Get all functions
+
         FUNCTIONS=$(aws lambda list-functions \
             --region "$REGION" \
             --query "Functions[?starts_with(FunctionName, 'shopping-assistant-api-${STAGE}')].FunctionName" \
             --output text)
-        
+
         MISSING_COUNT=0
-        MISSING_FUNCTIONS=""
-        
         for FUNCTION in $FUNCTIONS; do
           LAYERS=$(aws lambda get-function-configuration \
               --function-name "$FUNCTION" \
               --region "$REGION" \
               --query 'Layers[*].Arn' \
               --output text)
-          
+
           if echo "$LAYERS" | grep -q "$LAYER_NAME"; then
-            echo "✅ $FUNCTION - Layer attached"
+            echo "OK: $FUNCTION"
           else
-            echo "❌ $FUNCTION - Layer MISSING"
+            echo "MISSING: $FUNCTION"
             MISSING_COUNT=$((MISSING_COUNT + 1))
-            MISSING_FUNCTIONS="$MISSING_FUNCTIONS $FUNCTION"
           fi
         done
-        
+
         if [ $MISSING_COUNT -gt 0 ]; then
-          echo "::warning::$MISSING_COUNT function(s) are missing the Lambda layer!"
-          echo "Attempting to re-attach layer..."
-          
-          # Try to re-attach the layer
-          bash scripts/post-deploy-attach-layer.sh "$STAGE" "$REGION" "$LAYER_NAME"
-          
-          # Wait a bit for propagation
-          echo "Waiting 10 seconds for changes to propagate..."
-          sleep 10
-          
-          # Verify again
-          MISSING_COUNT=0
-          for FUNCTION in $FUNCTIONS; do
-            LAYERS=$(aws lambda get-function-configuration \
-                --function-name "$FUNCTION" \
-                --region "$REGION" \
-                --query 'Layers[*].Arn' \
-                --output text)
-            
-            if echo "$LAYERS" | grep -q "$LAYER_NAME"; then
-              echo "✅ $FUNCTION - Layer now attached"
-            else
-              echo "❌ $FUNCTION - Layer still MISSING"
-              MISSING_COUNT=$((MISSING_COUNT + 1))
-            fi
-          done
-          
-          if [ $MISSING_COUNT -gt 0 ]; then
-            echo "::error::Failed to attach layer to $MISSING_COUNT function(s) after retry!"
-            echo "Functions still missing layer:$MISSING_FUNCTIONS"
-            echo "Please manually attach the layer via AWS Console or run:"
-            echo "  bash scripts/post-deploy-attach-layer.sh $STAGE $REGION"
-            exit 1
-          else
-            echo "✅ Successfully fixed layer attachment for all functions"
-          fi
-        else
-          echo "✅ All functions verified to have the layer attached"
+          echo "::error::$MISSING_COUNT function(s) missing the layer. deploy.py should have handled this."
+          echo "To fix manually: bash scripts/post-deploy-attach-layer.sh $STAGE $REGION"
+          exit 1
         fi
+        echo "All functions have the layer attached."
