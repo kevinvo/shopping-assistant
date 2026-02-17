@@ -63,6 +63,22 @@ def load_config(stage: str, config_path: Path) -> Dict:
     return config
 
 
+def inject_layer_into_config(
+    config_path: Path, stage: str, layer_arn: str
+) -> None:
+    """Inject the layer ARN into Chalice config so it deploys atomically with code."""
+    with config_path.open("r", encoding="utf-8") as fh:
+        config = json.load(fh)
+
+    config["stages"][stage]["layers"] = [layer_arn]
+
+    with config_path.open("w", encoding="utf-8") as fh:
+        json.dump(config, fh, indent=2)
+        fh.write("\n")
+
+    log("INFO", f"Injected layer into config.json for stage '{stage}': {layer_arn}")
+
+
 def stage_env(stage: str, config: Dict) -> Dict[str, str]:
     return config.get("stages", {}).get(stage, {}).get("environment_variables", {})
 
@@ -519,23 +535,35 @@ def main(argv: List[str]) -> int:
             "No existing SQS event source mappings found; Chalice will create them",
         )
 
+    # Inject layer ARN into config.json BEFORE deploy so Chalice deploys
+    # code + layer atomically, eliminating the window where new code runs
+    # without the layer (which caused ModuleNotFoundError during deploys).
+    try:
+        layer_arn = fetch_latest_layer_arn(args.layer_name, args.region)
+        inject_layer_into_config(config_path, args.stage, layer_arn)
+    except (LayerAttachError, DeployError) as exc:
+        log("ERROR", f"Failed to inject layer into config: {exc}")
+        return 1
+
     try:
         retry_chalice_deploy(args.stage, args.max_attempts, app_dir)
     except DeployError as exc:
         log("ERROR", str(exc))
         return 1
 
-    # Attach layer after successful deploy.
+    # Verify layer is attached (should already be via config.json, this is a safety check).
     try:
-        attach_and_verify_layer(
-            args.stage,
-            args.region,
-            args.layer_name,
-            args.layer_max_retries,
-            args.layer_retry_delay,
-        )
+        if not verify_layer_attachment(args.stage, args.region, layer_arn):
+            log("WARN", "Layer not detected after deploy, re-attaching...")
+            attach_and_verify_layer(
+                args.stage,
+                args.region,
+                args.layer_name,
+                args.layer_max_retries,
+                args.layer_retry_delay,
+            )
     except DeployError as exc:
-        log("ERROR", f"Layer attachment failed: {exc}")
+        log("ERROR", f"Layer verification/attachment failed: {exc}")
         return 1
 
     # Update function runtimes to Python 3.12 (Chalice doesn't respect runtime in config.json)
