@@ -63,9 +63,7 @@ def load_config(stage: str, config_path: Path) -> Dict:
     return config
 
 
-def inject_layer_into_config(
-    config_path: Path, stage: str, layer_arn: str
-) -> None:
+def inject_layer_into_config(config_path: Path, stage: str, layer_arn: str) -> None:
     """Inject the layer ARN into Chalice config so it deploys atomically with code."""
     with config_path.open("r", encoding="utf-8") as fh:
         config = json.load(fh)
