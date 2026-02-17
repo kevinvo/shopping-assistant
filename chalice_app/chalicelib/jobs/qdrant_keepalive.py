@@ -19,7 +19,7 @@ def run_qdrant_keepalive() -> dict:
 
     try:
         indexer = IndexerFactory.create_indexer()
-        results = indexer.hybrid_search(query="test", limit=1)
+        results = indexer.hybrid_search(query="White Leather Sneakers", limit=1)
 
         logger.info(
             "Qdrant keep-alive successful",
