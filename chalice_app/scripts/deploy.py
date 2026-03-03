@@ -123,8 +123,10 @@ def inject_env_vars_from_ssm(stage: str, region: str, config_path: Path) -> None
     with config_path.open("r", encoding="utf-8") as fh:
         config = json.load(fh)
 
-    env_vars = config.setdefault("stages", {}).setdefault(stage, {}).setdefault(
-        "environment_variables", {}
+    env_vars = (
+        config.setdefault("stages", {})
+        .setdefault(stage, {})
+        .setdefault("environment_variables", {})
     )
     env_vars.update(injected)
 
@@ -132,7 +134,10 @@ def inject_env_vars_from_ssm(stage: str, region: str, config_path: Path) -> None
         json.dump(config, fh, indent=2)
         fh.write("\n")
 
-    log("INFO", f"Injected {len(injected)} SSM value(s) into config.json for stage '{stage}': {list(injected.keys())}")
+    log(
+        "INFO",
+        f"Injected {len(injected)} SSM value(s) into config.json for stage '{stage}': {list(injected.keys())}",
+    )
 
     # If we got an Athena bucket, also patch the IAM policy file to replace the placeholder ARN.
     athena_bucket = injected.get("ATHENA_OUTPUT_BUCKET")
@@ -151,7 +156,10 @@ def inject_env_vars_from_ssm(stage: str, region: str, config_path: Path) -> None
                     f'"{bucket_arn}/*"',
                 )
                 policy_file.write_text(policy_text, encoding="utf-8")
-                log("INFO", f"Patched Athena bucket ARN in {policy_file.name}: {bucket_arn}")
+                log(
+                    "INFO",
+                    f"Patched Athena bucket ARN in {policy_file.name}: {bucket_arn}",
+                )
 
 
 def update_websocket_domain(stage: str, region: str, config_path: Path) -> None:
@@ -168,15 +176,22 @@ def update_websocket_domain(stage: str, region: str, config_path: Path) -> None:
     try:
         apis = apigw_client.get_apis().get("Items", [])
         ws_apis = [
-            a for a in apis
+            a
+            for a in apis
             if a.get("ProtocolType") == "WEBSOCKET" and search_name in a.get("Name", "")
         ]
     except Exception as exc:
-        log("WARN", f"Could not list API Gateway v2 APIs: {exc} — WEBSOCKET_DOMAIN not updated")
+        log(
+            "WARN",
+            f"Could not list API Gateway v2 APIs: {exc} — WEBSOCKET_DOMAIN not updated",
+        )
         return
 
     if not ws_apis:
-        log("WARN", f"No WebSocket API found matching '{search_name}' — WEBSOCKET_DOMAIN not updated")
+        log(
+            "WARN",
+            f"No WebSocket API found matching '{search_name}' — WEBSOCKET_DOMAIN not updated",
+        )
         return
 
     api = ws_apis[0]

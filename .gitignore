@@ -112,3 +112,4 @@ logs/
 
 .coverage
 layer_inspect
+.claude/
