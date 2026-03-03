@@ -1,16 +1,16 @@
-name: CI/CD
+name: Deploy to Production
 
 on:
-  push:
-    branches: [ main ]
+  workflow_dispatch:
 
 env:
-  AWS_REGION: ap-southeast-1  # Updated to Singapore region
+  AWS_REGION: ap-southeast-1
 
 jobs:
-  build-and-deploy:
+  deploy-prod:
     runs-on: ubuntu-latest
-    
+    environment: production
+
     steps:
     - uses: actions/checkout@v3
 
@@ -35,38 +35,10 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements_dev.txt
-        pip install -r requirements.txt  # Root requirements.txt (migrated from lambda/)
-        pip install chalice  # Install Chalice for deployment
+        pip install -r requirements.txt
+        pip install chalice
         npm install -g aws-cdk@latest
         sudo apt-get update && sudo apt-get install -y jq
-
-    - name: Code Formatting (Black)
-      run: |
-        black --check chalice_app/ cdk_infrastructure/ glue_jobs/
-
-    - name: Linting (Ruff)
-      run: |
-        ruff check chalice_app/ cdk_infrastructure/ glue_jobs/
-
-    - name: Security Check (Bandit)
-      run: |
-        bandit -r chalice_app/ cdk_infrastructure/ glue_jobs/ -ll
-
-    - name: Type Checking (MyPy)
-      continue-on-error: true
-      run: |
-        mypy chalice_app/ cdk_infrastructure/ glue_jobs/ || echo "MyPy found type issues (non-blocking)"
-
-    - name: Run Tests
-      run: |
-        pytest -v --tb=short --cov=chalice_app --cov-report=term-missing chalice_app/tests
-
-    - name: Check Python Syntax
-      run: |
-        python -m py_compile $(find . -name "*.py" -not -path "./venv/*" -not -path "./layer/*" -not -path "./.venv/*" -not -path "./cdk.out/*" -not -path "./__pycache__/*")
-
-    - name: Verify Docker
-      run: docker --version
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v2
@@ -76,36 +48,22 @@ jobs:
         chmod +x chalice_app/scripts/build-layer.sh
         bash chalice_app/scripts/build-layer.sh
 
-    - name: CDK Synth
-      run: cdk synth --context infrastructure_env=test
+    - name: CDK Deploy (Infrastructure - Prod)
+      run: cdk deploy --require-approval never --context infrastructure_env=prod
 
-    - name: Security Scan with cdk-nag
-      run: |
-        npm install -g cdk-nag
-        cdk synth --context infrastructure_env=test --aspects node_modules/cdk-nag/lib/aspects/index.js
-
-    - name: CDK Deploy (Infrastructure)
-      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-      run: cdk deploy --require-approval never --context infrastructure_env=test
-      # CDK deploys infrastructure: S3, DynamoDB, SQS, EventBridge, VPC, IAM roles
-    
     - name: Publish Lambda Layer
-      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
       working-directory: chalice_app
       run: |
         python scripts/publish_layer.py shopping-assistant-chalice-layer --region ${{ env.AWS_REGION }}
-    
+
     - name: Prune API Gateway invoke permissions
-      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
       run: |
-        python .github/scripts/prune_lambda_policy.py --stage chalice-test --region ${{ env.AWS_REGION }}
-    
+        python .github/scripts/prune_lambda_policy.py --stage chalice-prod --region ${{ env.AWS_REGION }}
+
     - name: Cleanup Unused API Gateway REST APIs
-      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
       working-directory: chalice_app
       continue-on-error: true
       run: |
-        echo "Cleaning up unused API Gateway REST APIs before deployment..."
         python scripts/cleanup_unused_apis.py \
           --region ${{ env.AWS_REGION }} \
           --min-age-days 0 \
@@ -115,16 +73,14 @@ jobs:
           --execute || echo "API cleanup completed with warnings (non-blocking)"
 
     - name: Deploy Chalice stage with validation
-      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
       run: |
-        python chalice_app/scripts/deploy.py --stage chalice-test --region ${{ env.AWS_REGION }}
+        python chalice_app/scripts/deploy.py --stage chalice-prod --region ${{ env.AWS_REGION }}
 
     - name: Verify Layer Attachment
-      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
       working-directory: chalice_app
       run: |
         echo "Verifying layer attachment..."
-        STAGE="chalice-test"
+        STAGE="chalice-prod"
         REGION="${{ env.AWS_REGION }}"
         LAYER_NAME="shopping-assistant-chalice-layer"
 
@@ -150,8 +106,7 @@ jobs:
         done
 
         if [ $MISSING_COUNT -gt 0 ]; then
-          echo "::error::$MISSING_COUNT function(s) missing the layer. deploy.py should have handled this."
-          echo "To fix manually: bash scripts/post-deploy-attach-layer.sh $STAGE $REGION"
+          echo "::error::$MISSING_COUNT function(s) missing the layer."
           exit 1
         fi
         echo "All functions have the layer attached."

@@ -24,6 +24,20 @@ DEFAULT_LAYER_NAME = "shopping-assistant-chalice-layer"
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_RETRY_DELAY = 5
 
+# Maps Chalice stage name to the CDK infrastructure env name used for SSM paths.
+STAGE_TO_ENV: Dict[str, str] = {
+    "chalice-test": "test",
+    "chalice-prod": "prod",
+}
+
+# SSM parameter keys → Chalice env var names that get injected before deploy.
+SSM_ENV_VAR_MAPPING: Dict[str, str] = {
+    "chat-queue-url": "CHAT_PROCESSING_QUEUE_URL",
+    "eval-queue-url": "EVALUATION_QUEUE_URL",
+    "sns-alert-arn": "ERROR_ALERT_TOPIC_ARN",
+    "athena-output-bucket": "ATHENA_OUTPUT_BUCKET",
+}
+
 
 def log(level: str, message: str) -> None:
     print(f"[{level}] {message}")
@@ -75,6 +89,111 @@ def inject_layer_into_config(config_path: Path, stage: str, layer_arn: str) -> N
         fh.write("\n")
 
     log("INFO", f"Injected layer into config.json for stage '{stage}': {layer_arn}")
+
+
+def inject_env_vars_from_ssm(stage: str, region: str, config_path: Path) -> None:
+    """Read dynamic resource values from SSM and patch config.json before deploy.
+
+    Only applies to stages that have a matching env in STAGE_TO_ENV. For stages
+    that are not listed (e.g. 'dev'), this is a no-op.
+    """
+    env = STAGE_TO_ENV.get(stage)
+    if env is None:
+        log("INFO", f"No SSM env mapping for stage '{stage}', skipping SSM injection")
+        return
+
+    ssm_client = boto3.client("ssm", region_name=region)
+    injected: Dict[str, str] = {}
+
+    for ssm_key, env_var_name in SSM_ENV_VAR_MAPPING.items():
+        param_name = f"/shopping-assistant/{env}/{ssm_key}"
+        try:
+            response = ssm_client.get_parameter(Name=param_name)
+            value = response["Parameter"]["Value"]
+            injected[env_var_name] = value
+        except ssm_client.exceptions.ParameterNotFound:
+            log("WARN", f"SSM parameter not found: {param_name} (skipping)")
+        except Exception as exc:
+            log("WARN", f"Failed to read SSM parameter {param_name}: {exc} (skipping)")
+
+    if not injected:
+        log("INFO", "No SSM values injected (all parameters missing or skipped)")
+        return
+
+    with config_path.open("r", encoding="utf-8") as fh:
+        config = json.load(fh)
+
+    env_vars = config.setdefault("stages", {}).setdefault(stage, {}).setdefault(
+        "environment_variables", {}
+    )
+    env_vars.update(injected)
+
+    with config_path.open("w", encoding="utf-8") as fh:
+        json.dump(config, fh, indent=2)
+        fh.write("\n")
+
+    log("INFO", f"Injected {len(injected)} SSM value(s) into config.json for stage '{stage}': {list(injected.keys())}")
+
+    # If we got an Athena bucket, also patch the IAM policy file to replace the placeholder ARN.
+    athena_bucket = injected.get("ATHENA_OUTPUT_BUCKET")
+    if athena_bucket:
+        policy_file = config_path.parent / f"policy-{stage}.json"
+        if policy_file.exists():
+            policy_text = policy_file.read_text(encoding="utf-8")
+            if "INJECTED_BY_DEPLOY_ATHENA_BUCKET" in policy_text:
+                bucket_arn = f"arn:aws:s3:::{athena_bucket}"
+                policy_text = policy_text.replace(
+                    '"INJECTED_BY_DEPLOY_ATHENA_BUCKET"',
+                    f'"{bucket_arn}"',
+                )
+                policy_text = policy_text.replace(
+                    '"INJECTED_BY_DEPLOY_ATHENA_BUCKET/*"',
+                    f'"{bucket_arn}/*"',
+                )
+                policy_file.write_text(policy_text, encoding="utf-8")
+                log("INFO", f"Patched Athena bucket ARN in {policy_file.name}: {bucket_arn}")
+
+
+def update_websocket_domain(stage: str, region: str, config_path: Path) -> None:
+    """Resolve the deployed WebSocket API endpoint and patch WEBSOCKET_DOMAIN in config.json.
+
+    This is a best-effort step: if the API cannot be found, a warning is logged
+    and the placeholder value is left in place.
+    """
+    apigw_client = boto3.client("apigatewayv2", region_name=region)
+    # Chalice names the WebSocket API after the app name + stage, e.g.:
+    # "shopping-assistant-api-chalice-prod" or similar. We search by matching
+    # the stage prefix in the API name.
+    search_name = f"shopping-assistant-api-{stage}"
+    try:
+        apis = apigw_client.get_apis().get("Items", [])
+        ws_apis = [
+            a for a in apis
+            if a.get("ProtocolType") == "WEBSOCKET" and search_name in a.get("Name", "")
+        ]
+    except Exception as exc:
+        log("WARN", f"Could not list API Gateway v2 APIs: {exc} — WEBSOCKET_DOMAIN not updated")
+        return
+
+    if not ws_apis:
+        log("WARN", f"No WebSocket API found matching '{search_name}' — WEBSOCKET_DOMAIN not updated")
+        return
+
+    api = ws_apis[0]
+    api_id = api["ApiId"]
+    domain = f"{api_id}.execute-api.{region}.amazonaws.com"
+
+    with config_path.open("r", encoding="utf-8") as fh:
+        config = json.load(fh)
+
+    env_vars = config.get("stages", {}).get(stage, {}).get("environment_variables", {})
+    env_vars["WEBSOCKET_DOMAIN"] = domain
+
+    with config_path.open("w", encoding="utf-8") as fh:
+        json.dump(config, fh, indent=2)
+        fh.write("\n")
+
+    log("INFO", f"Updated WEBSOCKET_DOMAIN to '{domain}' for stage '{stage}'")
 
 
 def stage_env(stage: str, config: Dict) -> Dict[str, str]:
@@ -513,6 +632,12 @@ def main(argv: List[str]) -> int:
     config_path = app_dir / ".chalice" / "config.json"
 
     config = load_config(args.stage, config_path)
+
+    # Inject dynamic values (queue URLs, SNS ARN, Athena bucket) from SSM before deploy.
+    inject_env_vars_from_ssm(args.stage, args.region, config_path)
+
+    # Reload config after SSM injection so env_vars reflects injected values.
+    config = load_config(args.stage, config_path)
     env_vars = stage_env(args.stage, config)
 
     log("INFO", f"Deploying Chalice stage '{args.stage}' in region {args.region}")
@@ -548,6 +673,9 @@ def main(argv: List[str]) -> int:
     except DeployError as exc:
         log("ERROR", str(exc))
         return 1
+
+    # Resolve and persist the WebSocket domain after Chalice creates/updates the API.
+    update_websocket_domain(args.stage, args.region, config_path)
 
     # Verify layer is attached (should already be via config.json, this is a safety check).
     try:

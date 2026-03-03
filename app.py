@@ -8,5 +8,8 @@ app = App()
 # Set default runtime for custom resources to Node.js 20.x
 lambda_.Function._default_runtime = lambda_.Runtime.NODEJS_20_X
 
-ShoppingAssistantInfrastructureStack(app, "RedditScraperStack")
+env_name = app.node.try_get_context("infrastructure_env") or "test"
+stack_name = "RedditScraperStack" if env_name == "test" else f"RedditScraperStack-{env_name}"
+
+ShoppingAssistantInfrastructureStack(app, stack_name)
 app.synth()
