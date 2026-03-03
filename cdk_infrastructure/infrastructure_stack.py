@@ -10,6 +10,7 @@ from aws_cdk import (
     aws_iam as iam,
     Duration,
     RemovalPolicy,
+    CfnDeletionPolicy,
     CfnOutput,
     aws_dynamodb as dynamodb,
     aws_s3_deployment as s3_deployment,
@@ -148,7 +149,9 @@ class ShoppingAssistantInfrastructureStack(Stack):
 
         # Create the Glue scripts bucket
         self.glue_scripts_bucket = self.create_s3_bucket(
-            bucket_name=context_values.glue_scripts_bucket_name, id="GlueScriptsBucket"
+            bucket_name=context_values.glue_scripts_bucket_name,
+            id="GlueScriptsBucket",
+            removal_policy=RemovalPolicy.RETAIN,
         )
 
         # Deploy Glue scripts to S3
@@ -363,13 +366,19 @@ class ShoppingAssistantInfrastructureStack(Stack):
 
         return alarm
 
-    def create_s3_bucket(self, *, bucket_name: str, id: str) -> s3.Bucket:
+    def create_s3_bucket(
+        self,
+        *,
+        bucket_name: str,
+        id: str,
+        removal_policy: RemovalPolicy = RemovalPolicy.DESTROY,
+    ) -> s3.Bucket:
         return s3.Bucket(
             self,
             id=id,
             bucket_name=bucket_name,
-            removal_policy=RemovalPolicy.DESTROY,
-            auto_delete_objects=True,
+            removal_policy=removal_policy,
+            auto_delete_objects=removal_policy == RemovalPolicy.DESTROY,
             versioned=True,
         )
 
@@ -409,6 +418,7 @@ class ShoppingAssistantInfrastructureStack(Stack):
             },
             schedule={"scheduleExpression": ""},  # Explicitly disabled to reduce costs
         )
+        crawler.cfn_options.deletion_policy = CfnDeletionPolicy.RETAIN
 
         # Output the name of the Glue Crawler
         CfnOutput(
@@ -444,6 +454,7 @@ class ShoppingAssistantInfrastructureStack(Stack):
             },
             schedule={"scheduleExpression": ""},  # Explicitly disabled to reduce costs
         )
+        processed_crawler.cfn_options.deletion_policy = CfnDeletionPolicy.RETAIN
 
         # Output the name of the Processed Data Glue Crawler
         CfnOutput(
@@ -624,7 +635,7 @@ class ShoppingAssistantInfrastructureStack(Stack):
                 f"{self._pascal_case(stage)}ScraperLogGroup",
                 log_group_name=f"/aws/vendedlogs/states/{config['state_machine_name']}",
                 retention=logs.RetentionDays.ONE_MONTH,
-                removal_policy=RemovalPolicy.DESTROY,
+                removal_policy=RemovalPolicy.RETAIN,
             )
 
             lambda_function = lambda_.Function.from_function_name(
@@ -663,12 +674,13 @@ class ShoppingAssistantInfrastructureStack(Stack):
 
             lambda_function.grant_invoke(state_machine.role)
 
-            ssm.StringParameter(
+            ssm_param = ssm.StringParameter(
                 self,
                 f"{self._pascal_case(stage)}ScraperStateMachineParameter",
                 parameter_name=config["ssm_parameter"],
                 string_value=state_machine.state_machine_arn,
             )
+            ssm_param.apply_removal_policy(RemovalPolicy.RETAIN)
 
             CfnOutput(
                 self,
