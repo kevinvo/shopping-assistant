@@ -14,16 +14,44 @@
       "Effect": "Allow",
       "Action": [
         "dynamodb:GetItem",
+        "dynamodb:BatchGetItem",
         "dynamodb:PutItem",
+        "dynamodb:TransactWriteItems",
         "dynamodb:UpdateItem",
         "dynamodb:DeleteItem",
         "dynamodb:Query",
         "dynamodb:Scan"
       ],
       "Resource": [
-        "arn:aws:dynamodb:*:*:table/SessionsTable",
-        "arn:aws:dynamodb:*:*:table/SessionsTableV2",
-        "arn:aws:dynamodb:*:*:table/WebSocketConnectionsV2"
+        "arn:aws:dynamodb:*:*:table/SessionsTable-prod",
+        "arn:aws:dynamodb:*:*:table/SessionsTableV2-prod",
+        "arn:aws:dynamodb:*:*:table/WebSocketConnectionsV2-prod"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:GetItem",
+        "dynamodb:BatchGetItem",
+        "dynamodb:PutItem",
+        "dynamodb:TransactWriteItems",
+        "dynamodb:UpdateItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:Query",
+        "dynamodb:Scan"
+      ],
+      "Resource": [
+        "arn:aws:dynamodb:*:*:table/reddit-posts-prod",
+        "arn:aws:dynamodb:*:*:table/reddit-posts-prod/index/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "states:StartExecution"
+      ],
+      "Resource": [
+        "arn:aws:states:ap-southeast-1:979920756619:stateMachine:shopping-assistant-api-chalice-prod-scraper"
       ]
     },
     {
@@ -38,25 +66,46 @@
     {
       "Effect": "Allow",
       "Action": [
-        "s3:ListBucket"
-      ],
-      "Resource": "arn:aws:s3:::shopping-assistant-layers-ap-southeast-1"
-    },
-    {
-      "Effect": "Allow",
-      "Action": [
+        "s3:GetBucketLocation",
+        "s3:ListBucket",
         "s3:GetObject",
-        "s3:DeleteObject"
-      ],
-      "Resource": "arn:aws:s3:::shopping-assistant-layers-ap-southeast-1/*"
-    },
-    {
-      "Effect": "Allow",
-      "Action": [
-        "states:StartExecution"
+        "s3:PutObject"
       ],
       "Resource": [
-        "arn:aws:states:ap-southeast-1:979920756619:stateMachine:shopping-assistant-api-prod-scraper"
+        "INJECTED_BY_DEPLOY_ATHENA_BUCKET",
+        "INJECTED_BY_DEPLOY_ATHENA_BUCKET/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "sqs:SendMessage",
+        "sqs:ReceiveMessage",
+        "sqs:DeleteMessage",
+        "sqs:GetQueueAttributes"
+      ],
+      "Resource": [
+        "arn:aws:sqs:*:*:ChatProcessingQueue-prod",
+        "arn:aws:sqs:*:*:shopping-assistant-evaluation-queue-prod"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "execute-api:ManageConnections"
+      ],
+      "Resource": [
+        "arn:aws:execute-api:*:*:*/@connections/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "lambda:InvokeFunction",
+        "lambda:InvokeAsync"
+      ],
+      "Resource": [
+        "arn:aws:lambda:*:*:function:Reddit-Scraper-Stack-*"
       ]
     },
     {
@@ -83,22 +132,69 @@
     {
       "Effect": "Allow",
       "Action": [
-        "s3:GetBucketLocation",
-        "s3:ListBucket",
-        "s3:GetObject",
-        "s3:PutObject"
+        "glue:StartJobRun",
+        "glue:GetJobRun",
+        "glue:GetJob"
       ],
       "Resource": [
-        "arn:aws:s3:::redditscraperstack-athenaqueryresultsbucketae74152-mgcdqkp31f3b",
-        "arn:aws:s3:::redditscraperstack-athenaqueryresultsbucketae74152-mgcdqkp31f3b/*"
+        "arn:aws:glue:*:*:job/*"
       ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "glue:GetDatabase",
+        "glue:GetDatabases",
+        "glue:GetTable",
+        "glue:GetTables",
+        "glue:GetPartition",
+        "glue:GetPartitions",
+        "glue:GetTableVersion",
+        "glue:GetTableVersions"
+      ],
+      "Resource": [
+        "arn:aws:glue:*:*:catalog",
+        "arn:aws:glue:*:*:database/*",
+        "arn:aws:glue:*:*:table/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListBucket"
+      ],
+      "Resource": "arn:aws:s3:::shopping-assistant-layers-ap-southeast-1"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": "arn:aws:s3:::shopping-assistant-layers-ap-southeast-1/*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListBucket"
+      ],
+      "Resource": "arn:aws:s3:::shopping-assistant-processed-reddit-data-prod"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": "arn:aws:s3:::shopping-assistant-processed-reddit-data-prod/*"
     },
     {
       "Effect": "Allow",
       "Action": [
         "sns:Publish"
       ],
-      "Resource": "arn:aws:sns:ap-southeast-1:979920756619:job-failure-alerts"
+      "Resource": "arn:aws:sns:ap-southeast-1:979920756619:job-failure-alerts-prod"
     }
   ]
 }

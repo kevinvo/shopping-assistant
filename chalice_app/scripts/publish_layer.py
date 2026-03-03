@@ -17,7 +17,7 @@ import zipfile
 import boto3
 from botocore.exceptions import ClientError
 
-DEFAULT_LAYER_NAME = "shopping-assistant-chalice-dependencies"
+DEFAULT_LAYER_NAME = "shopping-assistant-chalice-layer"
 DEFAULT_REGION = "ap-southeast-1"
 MAX_DIRECT_UPLOAD = 50 * 1024 * 1024  # 50 MB
 

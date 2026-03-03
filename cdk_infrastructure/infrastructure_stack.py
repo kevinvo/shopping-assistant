@@ -91,6 +91,9 @@ class ShoppingAssistantInfrastructureStack(Stack):
         context_values = InfrastructureContextValues.from_stack(self)
         self.context_values = context_values
 
+        self.env_name = self.node.try_get_context("infrastructure_env") or "test"
+        self.resource_suffix = "" if self.env_name == "test" else f"-{self.env_name}"
+
         # 1. Create VPC and networking first
         self.vpc = ec2.Vpc(
             self,
@@ -200,16 +203,20 @@ class ShoppingAssistantInfrastructureStack(Stack):
             database=self.reddit_database, table_name=context_values.glue_table_name
         )
 
+        stateful_removal_policy = (
+            RemovalPolicy.RETAIN if self.env_name == "prod" else RemovalPolicy.DESTROY
+        )
+
         # Create Sessions Table first
         self.sessions_table = dynamodb.Table(
             self,
             "SessionsTable",
-            table_name="SessionsTable",
+            table_name=f"SessionsTable{self.resource_suffix}",
             partition_key=dynamodb.Attribute(
                 name="session_id", type=dynamodb.AttributeType.STRING
             ),
             time_to_live_attribute="expiry_time",
-            removal_policy=RemovalPolicy.DESTROY,
+            removal_policy=stateful_removal_policy,
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
         )
 
@@ -217,12 +224,12 @@ class ShoppingAssistantInfrastructureStack(Stack):
         self.sessions_table_v2 = dynamodb.Table(
             self,
             "SessionsTableV2",
-            table_name="SessionsTableV2",
+            table_name=f"SessionsTableV2{self.resource_suffix}",
             partition_key=dynamodb.Attribute(
                 name="id", type=dynamodb.AttributeType.STRING
             ),
             time_to_live_attribute="expiry_time",
-            removal_policy=RemovalPolicy.DESTROY,
+            removal_policy=stateful_removal_policy,
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
         )
 
@@ -231,31 +238,36 @@ class ShoppingAssistantInfrastructureStack(Stack):
         self.chat_processing_queue = sqs.Queue(
             self,
             "ChatProcessingQueue",
-            queue_name="ChatProcessingQueue",
+            queue_name=f"ChatProcessingQueue{self.resource_suffix}",
             visibility_timeout=Duration.seconds(900),  # 15 minutes
             retention_period=Duration.days(1),
+            removal_policy=stateful_removal_policy,
         )
 
         self.evaluation_queue = sqs.Queue(
             self,
             "EvaluationQueue",
-            queue_name="shopping-assistant-evaluation-queue",
+            queue_name=f"shopping-assistant-evaluation-queue{self.resource_suffix}",
             visibility_timeout=Duration.seconds(300),  # 5 min for evaluation processing
             retention_period=Duration.days(7),
+            removal_policy=stateful_removal_policy,
         )
 
         # Create WebSocket connections table for Chalice WebSocket handlers
         self.connections_table = dynamodb.Table(
             self,
             "WebSocketConnectionsV2",
-            table_name="WebSocketConnectionsV2",
+            table_name=f"WebSocketConnectionsV2{self.resource_suffix}",
             partition_key=dynamodb.Attribute(
                 name="id", type=dynamodb.AttributeType.STRING
             ),
             time_to_live_attribute="ttl",
-            removal_policy=RemovalPolicy.DESTROY,
+            removal_policy=stateful_removal_policy,
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
         )
+
+        # Export key resource values to SSM for use by deploy scripts
+        self._export_resources_to_ssm()
 
     def create_alerts_topic(self) -> sns.Topic:
         """Create an SNS topic for job failure alerts."""
@@ -263,7 +275,7 @@ class ShoppingAssistantInfrastructureStack(Stack):
             self,
             "JobFailureAlertsTopic",
             display_name="Job Failure Alerts",
-            topic_name="job-failure-alerts",
+            topic_name=f"job-failure-alerts{self.resource_suffix}",
         )
 
         # Output the SNS topic ARN
@@ -275,6 +287,24 @@ class ShoppingAssistantInfrastructureStack(Stack):
         )
 
         return topic
+
+    def _export_resources_to_ssm(self) -> None:
+        """Export key resource values to SSM for use by Chalice deploy scripts."""
+        exports = {
+            "sessions-table-name": self.sessions_table_v2.table_name,
+            "connections-table-name": self.connections_table.table_name,
+            "chat-queue-url": self.chat_processing_queue.queue_url,
+            "eval-queue-url": self.evaluation_queue.queue_url,
+            "sns-alert-arn": self.alerts_topic.topic_arn,
+            "athena-output-bucket": self.athena_results_bucket.bucket_name,
+        }
+        for key, value in exports.items():
+            ssm.StringParameter(
+                self,
+                f"ResourceExport{self._pascal_case(key)}",
+                parameter_name=f"/shopping-assistant/{self.env_name}/{key}",
+                string_value=value,
+            )
 
     def add_email_subscription_to_alerts_topic(self, email_address: str):
         """Add an email subscription to the alerts topic."""
@@ -835,7 +865,7 @@ class ShoppingAssistantInfrastructureStack(Stack):
             timeout=Duration.minutes(15),
             memory_size=512,
             environment={
-                "ENVIRONMENT": "prod",
+                "ENVIRONMENT": self.env_name,
                 "ATHENA_OUTPUT_BUCKET": self.athena_results_bucket.bucket_name,
                 "ATHENA_DATABASE": self.context_values.glue_database_name,
                 "TABLE_NAME": "merged_data",
@@ -873,7 +903,8 @@ class ShoppingAssistantInfrastructureStack(Stack):
 
         # Add Secrets Manager permissions
         secret_arn = self.format_arn(
-            service="secretsmanager", resource="secret:prod/shopping-assistant/app*"
+            service="secretsmanager",
+            resource=f"secret:{self.env_name}/shopping-assistant/app*",
         )
         lambda_function.add_to_role_policy(
             iam.PolicyStatement(

@@ -3,6 +3,7 @@ from typing import List, Dict, Any, Set
 from langchain.schema import Document
 from dataclasses import dataclass
 from collections import Counter
+import os
 from chalicelib.core.config import config
 from chalicelib.core.logger_config import setup_logger
 from qdrant_client import QdrantClient
@@ -160,7 +161,7 @@ class QdrantIndexer:
             api_key=SecretStr(config.openai_api_key),
             model="text-embedding-3-small",
         )
-        self.collection_name = "reddit_posts"
+        self.collection_name = os.environ.get("QDRANT_COLLECTION_NAME", "reddit_posts")
         # Store vocabulary and IDF for query-time sparse vector generation
         # This will be populated when documents are indexed
         self._vocabulary_indices: Dict[str, int] = {}
