@@ -142,7 +142,12 @@ def inject_env_vars_from_ssm(stage: str, region: str, config_path: Path) -> None
     # If we got an Athena bucket, also patch the IAM policy file to replace the placeholder ARN.
     athena_bucket = injected.get("ATHENA_OUTPUT_BUCKET")
     if athena_bucket:
-        policy_file = config_path.parent / f"policy-{stage}.json"
+        iam_policy_file = config.get("stages", {}).get(stage, {}).get("iam_policy_file")
+        policy_file = (
+            config_path.parent / iam_policy_file
+            if iam_policy_file
+            else config_path.parent / f"policy-{stage}.json"
+        )
         if policy_file.exists():
             policy_text = policy_file.read_text(encoding="utf-8")
             if "INJECTED_BY_DEPLOY_ATHENA_BUCKET" in policy_text:
