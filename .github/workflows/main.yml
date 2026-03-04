@@ -77,16 +77,16 @@ jobs:
         bash chalice_app/scripts/build-layer.sh
 
     - name: CDK Synth
-      run: cdk synth --context infrastructure_env=test
+      run: cdk synth --context infrastructure_env=test --context scraper_stages=chalice-dev,chalice-test
 
     - name: Security Scan with cdk-nag
       run: |
         npm install -g cdk-nag
-        cdk synth --context infrastructure_env=test --aspects node_modules/cdk-nag/lib/aspects/index.js
+        cdk synth --context infrastructure_env=test --context scraper_stages=chalice-dev,chalice-test --aspects node_modules/cdk-nag/lib/aspects/index.js
 
     - name: CDK Deploy (Infrastructure)
       if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-      run: cdk deploy --require-approval never --context infrastructure_env=test
+      run: cdk deploy --require-approval never --context infrastructure_env=test --context scraper_stages=chalice-dev,chalice-test
       # CDK deploys infrastructure: S3, DynamoDB, SQS, EventBridge, VPC, IAM roles
     
     - name: Publish Lambda Layer

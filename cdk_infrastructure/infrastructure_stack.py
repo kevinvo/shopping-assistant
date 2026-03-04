@@ -133,29 +133,39 @@ class ShoppingAssistantInfrastructureStack(Stack):
         self.raw_data_bucket = self.create_s3_bucket(
             bucket_name=context_values.raw_reddit_data_bucket_name,
             id="RawRedditData",
+            removal_policy=RemovalPolicy.RETAIN,
         )
         self.raw_test_data_bucket = self.create_s3_bucket(
             bucket_name=context_values.raw_reddit_test_data_bucket_name,
             id="RawRedditTestData",
+            removal_policy=RemovalPolicy.RETAIN,
         )
         self.processed_data_bucket = self.create_s3_bucket(
             bucket_name=context_values.processed_reddit_data_bucket_name,
             id="ProcessedRedditData",
+            removal_policy=RemovalPolicy.RETAIN,
         )
         self.processed_test_data_bucket = self.create_s3_bucket(
             bucket_name=context_values.processed_reddit_test_data_bucket_name,
             id="ProcessedRedditTestData",
-        )
-
-        # Create the Glue scripts bucket
-        self.glue_scripts_bucket = self.create_s3_bucket(
-            bucket_name=context_values.glue_scripts_bucket_name,
-            id="GlueScriptsBucket",
             removal_policy=RemovalPolicy.RETAIN,
         )
 
-        # Deploy Glue scripts to S3
-        self.deploy_glue_jobs()
+        # The Glue scripts bucket is shared infrastructure managed by the test stack.
+        # In prod, reference the existing bucket instead of creating a new one.
+        if self.env_name == "test":
+            self.glue_scripts_bucket = self.create_s3_bucket(
+                bucket_name=context_values.glue_scripts_bucket_name,
+                id="GlueScriptsBucket",
+                removal_policy=RemovalPolicy.RETAIN,
+            )
+            self.deploy_glue_jobs()
+        else:
+            self.glue_scripts_bucket = s3.Bucket.from_bucket_name(
+                self,
+                "GlueScriptsBucket",
+                context_values.glue_scripts_bucket_name,
+            )
 
         # Create Athena results bucket before Lambda functions
         self.athena_results_bucket = self.create_athena_results_bucket()
@@ -167,8 +177,11 @@ class ShoppingAssistantInfrastructureStack(Stack):
         self.reddit_database = self.create_glue_database(
             name=context_values.glue_database_name
         )
-        self.create_glue_crawler(database=self.reddit_database)
-        self.create_processed_data_glue_crawler(database=self.reddit_database)
+        # Glue crawlers are shared infrastructure managed by the test stack only.
+        # The prod stack references the same data but does not own the crawlers.
+        if self.env_name == "test":
+            self.create_glue_crawler(database=self.reddit_database)
+            self.create_processed_data_glue_crawler(database=self.reddit_database)
 
         # Output the Glue database name
         CfnOutput(
