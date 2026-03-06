@@ -145,7 +145,13 @@ def websocket_message(event):
 
 
 # SQS handlers must be defined at module level for Chalice to discover them
-@app.on_sqs_message(queue="ChatProcessingQueue", batch_size=1)
+# Queue names are read from env vars so the correct stage-specific queue is
+# used at `chalice deploy` time (env vars are set by deploy.py before invoking
+# `chalice deploy`). Defaults match the test/dev queue names.
+@app.on_sqs_message(
+    queue=os.environ.get("CHAT_PROCESSING_QUEUE_NAME", "ChatProcessingQueue"),
+    batch_size=1,
+)
 @notify_on_exception
 def chat_processor(event):
     """Process chat messages from SQS queue."""
@@ -181,7 +187,12 @@ def chat_processor(event):
         raise
 
 
-@app.on_sqs_message(queue="shopping-assistant-evaluation-queue", batch_size=10)
+@app.on_sqs_message(
+    queue=os.environ.get(
+        "EVALUATION_QUEUE_NAME", "shopping-assistant-evaluation-queue"
+    ),
+    batch_size=10,
+)
 @notify_on_exception
 def evaluator(event):
     """Process evaluation tasks from SQS queue."""

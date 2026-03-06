@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -763,6 +764,21 @@ def main(argv: List[str]) -> int:
     except (LayerAttachError, DeployError) as exc:
         log("ERROR", f"Failed to inject layer into config: {exc}")
         return 1
+
+    # Propagate stage-specific SQS queue names into the local environment so
+    # that `chalice deploy` (a subprocess) picks them up when it imports app.py.
+    # app.py reads queue names from these env vars at decoration time, which lets
+    # it use the correct per-stage queue (e.g. "ChatProcessingQueue-prod" in prod
+    # vs "ChatProcessingQueue" in test) rather than hardcoded test-env defaults.
+    for url_key, name_key in [
+        ("CHAT_PROCESSING_QUEUE_URL", "CHAT_PROCESSING_QUEUE_NAME"),
+        ("EVALUATION_QUEUE_URL", "EVALUATION_QUEUE_NAME"),
+    ]:
+        url = env_vars.get(url_key, "")
+        if url and "/" in url:
+            queue_name = url.rsplit("/", 1)[-1]
+            os.environ[name_key] = queue_name
+            log("INFO", f"Set {name_key}={queue_name} for chalice deploy subprocess")
 
     # Prune stale API Gateway v2 permission statements from WebSocket Lambda
     # functions before deploying.  Without this, each deploy that creates a new
