@@ -142,7 +142,12 @@ def inject_env_vars_from_ssm(stage: str, region: str, config_path: Path) -> None
     # If we got an Athena bucket, also patch the IAM policy file to replace the placeholder ARN.
     athena_bucket = injected.get("ATHENA_OUTPUT_BUCKET")
     if athena_bucket:
-        policy_file = config_path.parent / f"policy-{stage}.json"
+        iam_policy_file = config.get("stages", {}).get(stage, {}).get("iam_policy_file")
+        policy_file = (
+            config_path.parent / iam_policy_file
+            if iam_policy_file
+            else config_path.parent / f"policy-{stage}.json"
+        )
         if policy_file.exists():
             policy_text = policy_file.read_text(encoding="utf-8")
             if "INJECTED_BY_DEPLOY_ATHENA_BUCKET" in policy_text:
@@ -530,8 +535,25 @@ def ensure_post_deploy(
     if not mappings.get("EventSourceMappings"):
         raise DeployError(f"No event-source mapping found for {function_name}")
 
-    state = mappings["EventSourceMappings"][0].get("State")
-    if state != "Enabled":
+    mapping_entry = mappings["EventSourceMappings"][0]
+    state = mapping_entry.get("State")
+    if state == "Disabled":
+        log("WARN", f"Event-source mapping for {function_name} is Disabled; re-enabling...")
+        mapping_uuid = mapping_entry["UUID"]
+        lambda_client.update_event_source_mapping(UUID=mapping_uuid, Enabled=True)
+        # Wait for the mapping to reach Enabled state
+        for _ in range(12):
+            time.sleep(5)
+            check = lambda_client.list_event_source_mappings(FunctionName=function_name)
+            state = check["EventSourceMappings"][0].get("State", "")
+            log("INFO", f"Event-source mapping state: {state}")
+            if state == "Enabled":
+                break
+        else:
+            raise DeployError(
+                f"Event-source mapping for {function_name} did not reach Enabled state (current: {state})"
+            )
+    elif state != "Enabled":
         raise DeployError(f"Event-source mapping for {function_name} is '{state}'")
 
     queue_url = env_vars.get("CHAT_PROCESSING_QUEUE_URL")
