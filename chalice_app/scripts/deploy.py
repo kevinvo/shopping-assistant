@@ -24,6 +24,14 @@ DEFAULT_LAYER_NAME = "shopping-assistant-chalice-layer"
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_RETRY_DELAY = 5
 
+# WebSocket handler suffixes whose Lambda resource-based policies are pruned
+# before each deploy to prevent PolicyLengthExceededException accumulation.
+WEBSOCKET_HANDLER_SUFFIXES = [
+    "websocket_connect",
+    "websocket_message",
+    "websocket_disconnect",
+]
+
 # Maps Chalice stage name to the CDK infrastructure env name used for SSM paths.
 STAGE_TO_ENV: Dict[str, str] = {
     "chalice-test": "test",
@@ -339,6 +347,54 @@ def write_deployed_config(stage: str, deployed_state: Dict, config_path: Path) -
 def run_command(cmd: List[str], cwd: Optional[Path] = None) -> None:
     log("INFO", f"Executing: {' '.join(cmd)}")
     subprocess.run(cmd, cwd=cwd, check=True)
+
+
+def prune_websocket_permissions(stage: str, region: str) -> None:
+    """Remove stale API Gateway v2 permission statements from WebSocket Lambda functions.
+
+    Each deploy creates a new WebSocket API (because the Chalice deployed-state
+    file is not persisted in CI), causing Chalice to call add_permission for the
+    new API ID without removing statements from previous API IDs.  Over many
+    deploys the resource-based policy grows past the 20 480-byte AWS limit.
+
+    Pruning all apigateway.amazonaws.com statements before deploy gives Chalice a
+    clean slate; it will re-add exactly the statements needed for the current API.
+    """
+    lambda_client = boto3.client("lambda", region_name=region)
+
+    for suffix in WEBSOCKET_HANDLER_SUFFIXES:
+        function_name = f"shopping-assistant-api-{stage}-{suffix}"
+        try:
+            policy_resp = lambda_client.get_policy(FunctionName=function_name)
+        except ClientError as exc:
+            if exc.response["Error"]["Code"] == "ResourceNotFoundException":
+                # Function or policy not yet created; nothing to prune.
+                continue
+            log("WARN", f"Could not fetch policy for {function_name}: {exc}")
+            continue
+
+        policy = json.loads(policy_resp["Policy"])
+        stale_sids = [
+            stmt["Sid"]
+            for stmt in policy.get("Statement", [])
+            if stmt.get("Principal", {}).get("Service") == "apigateway.amazonaws.com"
+        ]
+
+        if not stale_sids:
+            log("INFO", f"No stale apigateway permissions on {function_name}")
+            continue
+
+        for sid in stale_sids:
+            try:
+                lambda_client.remove_permission(
+                    FunctionName=function_name, StatementId=sid
+                )
+                log("INFO", f"Pruned permission '{sid}' from {function_name}")
+            except ClientError as exc:
+                log(
+                    "WARN",
+                    f"Failed to remove permission '{sid}' from {function_name}: {exc}",
+                )
 
 
 def retry_chalice_deploy(stage: str, max_attempts: int, app_dir: Path) -> None:
@@ -707,6 +763,12 @@ def main(argv: List[str]) -> int:
     except (LayerAttachError, DeployError) as exc:
         log("ERROR", f"Failed to inject layer into config: {exc}")
         return 1
+
+    # Prune stale API Gateway v2 permission statements from WebSocket Lambda
+    # functions before deploying.  Without this, each deploy that creates a new
+    # WebSocket API appends a new add_permission statement without removing the
+    # old ones, eventually exceeding the 20 480-byte resource-policy limit.
+    prune_websocket_permissions(args.stage, args.region)
 
     try:
         retry_chalice_deploy(args.stage, args.max_attempts, app_dir)
