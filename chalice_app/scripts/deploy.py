@@ -538,7 +538,10 @@ def ensure_post_deploy(
     mapping_entry = mappings["EventSourceMappings"][0]
     state = mapping_entry.get("State")
     if state == "Disabled":
-        log("WARN", f"Event-source mapping for {function_name} is Disabled; re-enabling...")
+        log(
+            "WARN",
+            f"Event-source mapping for {function_name} is Disabled; re-enabling...",
+        )
         mapping_uuid = mapping_entry["UUID"]
         lambda_client.update_event_source_mapping(UUID=mapping_uuid, Enabled=True)
         # Wait for the mapping to reach Enabled state
