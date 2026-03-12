@@ -175,40 +175,42 @@ def inject_env_vars_from_ssm(stage: str, region: str, config_path: Path) -> None
                 )
 
 
+def get_deployed_websocket_api_id(stage: str, config_path: Path) -> Optional[str]:
+    """Read the WebSocket API ID from Chalice's deployed state file."""
+    deployed_file = config_path.parent / "deployed" / f"{stage}.json"
+    if not deployed_file.exists():
+        return None
+    try:
+        with deployed_file.open("r", encoding="utf-8") as fh:
+            state = json.load(fh)
+        ws = next(
+            (
+                r
+                for r in state.get("resources", [])
+                if r.get("resource_type") == "websocket_api"
+            ),
+            None,
+        )
+        return ws.get("websocket_api_id") if ws else None
+    except Exception as exc:
+        log("WARN", f"Could not read deployed state for WebSocket API ID: {exc}")
+        return None
+
+
 def update_websocket_domain(stage: str, region: str, config_path: Path) -> None:
     """Resolve the deployed WebSocket API endpoint and patch WEBSOCKET_DOMAIN in config.json.
 
-    This is a best-effort step: if the API cannot be found, a warning is logged
-    and the placeholder value is left in place.
+    Reads the API ID from Chalice's deployed state file (written by chalice deploy)
+    rather than listing all APIs, which avoids picking a stale orphaned API.
     """
-    apigw_client = boto3.client("apigatewayv2", region_name=region)
-    # Chalice names the WebSocket API after the app name + stage, e.g.:
-    # "shopping-assistant-api-chalice-prod" or similar. We search by matching
-    # the stage prefix in the API name.
-    search_name = f"shopping-assistant-api-{stage}"
-    try:
-        apis = apigw_client.get_apis().get("Items", [])
-        ws_apis = [
-            a
-            for a in apis
-            if a.get("ProtocolType") == "WEBSOCKET" and search_name in a.get("Name", "")
-        ]
-    except Exception as exc:
+    api_id = get_deployed_websocket_api_id(stage, config_path)
+    if not api_id:
         log(
             "WARN",
-            f"Could not list API Gateway v2 APIs: {exc} — WEBSOCKET_DOMAIN not updated",
+            "No websocket_api_id in deployed state — WEBSOCKET_DOMAIN not updated",
         )
         return
 
-    if not ws_apis:
-        log(
-            "WARN",
-            f"No WebSocket API found matching '{search_name}' — WEBSOCKET_DOMAIN not updated",
-        )
-        return
-
-    api = ws_apis[0]
-    api_id = api["ApiId"]
     domain = f"{api_id}.execute-api.{region}.amazonaws.com"
 
     with config_path.open("r", encoding="utf-8") as fh:
@@ -222,6 +224,71 @@ def update_websocket_domain(stage: str, region: str, config_path: Path) -> None:
         fh.write("\n")
 
     log("INFO", f"Updated WEBSOCKET_DOMAIN to '{domain}' for stage '{stage}'")
+
+
+def fix_websocket_permissions(stage: str, region: str, config_path: Path) -> None:
+    """Ensure WebSocket Lambda functions have the correct API Gateway invoke permission.
+
+    After chalice deploy, the deployed state holds the authoritative WebSocket API ID.
+    This function removes any stale permissions and adds the correct one for each
+    WebSocket handler (connect, disconnect, message).
+    """
+    api_id = get_deployed_websocket_api_id(stage, config_path)
+    if not api_id:
+        log("WARN", "No websocket_api_id in deployed state — skipping permission fix")
+        return
+
+    try:
+        account_id = boto3.client("sts", region_name=region).get_caller_identity()[
+            "Account"
+        ]
+    except Exception as exc:
+        log("WARN", f"Could not determine account ID: {exc} — skipping permission fix")
+        return
+
+    source_arn = f"arn:aws:execute-api:{region}:{account_id}:{api_id}/*"
+    lambda_client = boto3.client("lambda", region_name=region)
+
+    for fn_suffix in ("websocket_connect", "websocket_disconnect", "websocket_message"):
+        function_name = f"shopping-assistant-api-{stage}-{fn_suffix}"
+
+        # Remove all existing statements to clear stale permissions.
+        try:
+            policy = lambda_client.get_policy(FunctionName=function_name)["Policy"]
+            sids = [
+                s["Sid"]
+                for s in json.loads(policy).get("Statement", [])
+                if s.get("Sid")
+            ]
+            for sid in sids:
+                try:
+                    lambda_client.remove_permission(
+                        FunctionName=function_name, StatementId=sid
+                    )
+                    log(
+                        "INFO", f"Removed stale permission '{sid}' from {function_name}"
+                    )
+                except lambda_client.exceptions.ResourceNotFoundException:
+                    pass
+        except lambda_client.exceptions.ResourceNotFoundException:
+            pass
+        except Exception as exc:
+            log("WARN", f"Could not read policy for {function_name}: {exc}")
+
+        # Add the correct permission for the current WebSocket API.
+        try:
+            lambda_client.add_permission(
+                FunctionName=function_name,
+                StatementId="websocket-api-invoke",
+                Action="lambda:InvokeFunction",
+                Principal="apigateway.amazonaws.com",
+                SourceArn=source_arn,
+            )
+            log("INFO", f"Set permission for {function_name} → API {api_id}")
+        except lambda_client.exceptions.ResourceConflictException:
+            log("INFO", f"Permission already correct for {function_name}")
+        except Exception as exc:
+            log("WARN", f"Failed to set permission for {function_name}: {exc}")
 
 
 def stage_env(stage: str, config: Dict) -> Dict[str, str]:
@@ -778,6 +845,9 @@ def main(argv: List[str]) -> int:
 
     # Resolve and persist the WebSocket domain after Chalice creates/updates the API.
     update_websocket_domain(args.stage, args.region, config_path)
+
+    # Fix Lambda permissions so WebSocket handlers always point to the current API.
+    fix_websocket_permissions(args.stage, args.region, config_path)
 
     # Verify layer is attached (should already be via config.json, this is a safety check).
     try:

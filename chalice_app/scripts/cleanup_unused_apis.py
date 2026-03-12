@@ -10,9 +10,10 @@ for EDGE endpoint type.
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Dict, List, Set, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import boto3
 from botocore.exceptions import ClientError
@@ -48,13 +49,106 @@ def load_deployed_apis(chalice_app_dir: Path) -> Set[str]:
                     if api_id:
                         api_ids.add(api_id)
                         log(
-                            "INFO", f"Found active API {api_id} in {deployed_file.name}"
+                            "INFO",
+                            f"Found active REST API {api_id} in {deployed_file.name}",
                         )
 
         except Exception as e:
             log("ERROR", f"Failed to read {deployed_file}: {e}")
 
     return api_ids
+
+
+def load_deployed_websocket_apis(chalice_app_dir: Path) -> Set[str]:
+    """
+    Load all WebSocket API IDs from Chalice deployed state files.
+
+    Returns a set of WebSocket API IDs that are currently in use.
+    """
+    deployed_dir = chalice_app_dir / ".chalice" / "deployed"
+    if not deployed_dir.exists():
+        return set()
+
+    api_ids = set()
+
+    for deployed_file in deployed_dir.glob("*.json"):
+        try:
+            with deployed_file.open("r", encoding="utf-8") as f:
+                state = json.load(f)
+
+            for resource in state.get("resources", []):
+                if resource.get("resource_type") == "websocket_api":
+                    api_id = resource.get("websocket_api_id")
+                    if api_id:
+                        api_ids.add(api_id)
+                        log(
+                            "INFO",
+                            f"Found active WebSocket API {api_id} in {deployed_file.name}",
+                        )
+
+        except Exception as e:
+            log("ERROR", f"Failed to read {deployed_file}: {e}")
+
+    return api_ids
+
+
+def list_all_websocket_apis(region: str, name_filter: str) -> List[Dict]:
+    """List all WebSocket APIs matching name_filter (handles pagination)."""
+    client = boto3.client("apigatewayv2", region_name=region)
+    all_apis: List[Dict] = []
+    try:
+        paginator = client.get_paginator("get_apis")
+        for page in paginator.paginate():
+            for api in page.get("Items", []):
+                if api.get("ProtocolType") == "WEBSOCKET" and name_filter in api.get(
+                    "Name", ""
+                ):
+                    all_apis.append(api)
+    except Exception as e:
+        log("ERROR", f"Failed to list WebSocket APIs: {e}")
+    return all_apis
+
+
+def delete_websocket_api(
+    api_id: str, api_name: str, region: str, dry_run: bool = True, max_retries: int = 3
+) -> bool:
+    """Delete a WebSocket API with retry logic for rate limiting."""
+    if dry_run:
+        log("DRY-RUN", f"Would delete WebSocket API {api_id} ({api_name})")
+        return True
+
+    client = boto3.client("apigatewayv2", region_name=region)
+
+    for attempt in range(max_retries):
+        try:
+            client.delete_api(ApiId=api_id)
+            log("INFO", f"✅ Deleted WebSocket API {api_id} ({api_name})")
+            return True
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code", "")
+            if error_code == "NotFoundException":
+                log(
+                    "WARN",
+                    f"WebSocket API {api_id} not found (may have been deleted already)",
+                )
+                return True
+            elif error_code == "TooManyRequestsException":
+                if attempt < max_retries - 1:
+                    wait_time = (2**attempt) * 2
+                    log("WARN", f"Rate limited, retrying in {wait_time}s...")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    log(
+                        "ERROR",
+                        f"Failed to delete WebSocket API {api_id} after {max_retries} attempts: {e}",
+                    )
+                    return False
+            else:
+                log("ERROR", f"Failed to delete WebSocket API {api_id}: {e}")
+                return False
+
+    return False
 
 
 def list_all_rest_apis(region: str) -> List[Dict]:
@@ -83,7 +177,6 @@ def delete_rest_api(
         return True
 
     apigateway = boto3.client("apigateway", region_name=region)
-    import time
 
     for attempt in range(max_retries):
         try:
@@ -315,8 +408,6 @@ def main(argv: List[str]) -> int:
     log("WARN", f"   Press Ctrl+C within {args.countdown_seconds} seconds to cancel...")
 
     try:
-        import time
-
         for i in range(args.countdown_seconds, 0, -1):
             print(f"\r   Starting deletion in {i} seconds...", end="", flush=True)
             time.sleep(1)
@@ -335,8 +426,6 @@ def main(argv: List[str]) -> int:
     deleted_count = 0
     failed_count = 0
 
-    import time
-
     for i, api in enumerate(unused_apis, 1):
         api_id = api.get("id")
         api_name = api.get("name", "Unknown")
@@ -354,13 +443,71 @@ def main(argv: List[str]) -> int:
 
     log("INFO", "")
     log("INFO", "=" * 70)
-    log("INFO", f"Cleanup complete: {deleted_count} deleted, {failed_count} failed")
+    log(
+        "INFO",
+        f"REST API cleanup complete: {deleted_count} deleted, {failed_count} failed",
+    )
     log("INFO", "=" * 70)
 
-    return 0 if failed_count == 0 else 1
+    # --- WebSocket API cleanup ---
+    log("INFO", "")
+    log("INFO", "=" * 70)
+    log("INFO", "WebSocket API Cleanup")
+    log("INFO", "=" * 70)
+
+    active_ws_api_ids = load_deployed_websocket_apis(args.chalice_app_dir)
+    log(
+        "INFO",
+        f"Found {len(active_ws_api_ids)} active WebSocket API(s): {', '.join(sorted(active_ws_api_ids))}",
+    )
+
+    all_ws_apis = list_all_websocket_apis(args.region, args.api_name_filter)
+    log("INFO", f"Found {len(all_ws_apis)} total WebSocket API(s) matching filter")
+
+    unused_ws_apis = [a for a in all_ws_apis if a.get("ApiId") not in active_ws_api_ids]
+
+    if not unused_ws_apis:
+        log("INFO", "✅ No unused WebSocket APIs found to clean up!")
+        return 0 if failed_count == 0 else 1
+
+    log("INFO", f"Found {len(unused_ws_apis)} unused WebSocket API(s) to delete:")
+    for api in unused_ws_apis:
+        log(
+            "INFO",
+            f"  - {api.get('ApiId')} ({api.get('Name')}) created: {format_date(str(api.get('CreatedDate', '')))}",
+        )
+
+    if dry_run:
+        log("INFO", "🔍 DRY-RUN mode: No WebSocket APIs will be deleted")
+        return 0 if failed_count == 0 else 1
+
+    ws_deleted = 0
+    ws_failed = 0
+
+    for i, api in enumerate(unused_ws_apis, 1):
+        api_id = api.get("ApiId")
+        api_name = api.get("Name", "Unknown")
+        log(
+            "INFO",
+            f"[{i}/{len(unused_ws_apis)}] Deleting WebSocket API {api_id} ({api_name})...",
+        )
+        if delete_websocket_api(api_id, api_name, args.region, dry_run=False):
+            ws_deleted += 1
+        else:
+            ws_failed += 1
+        if i < len(unused_ws_apis):
+            time.sleep(args.delay_seconds)
+
+    log("INFO", "")
+    log("INFO", "=" * 70)
+    log(
+        "INFO",
+        f"WebSocket API cleanup complete: {ws_deleted} deleted, {ws_failed} failed",
+    )
+    log("INFO", "=" * 70)
+
+    return 0 if (failed_count == 0 and ws_failed == 0) else 1
 
 
 if __name__ == "__main__":
-    from datetime import timedelta
-
     sys.exit(main(sys.argv[1:]))
