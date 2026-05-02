@@ -409,8 +409,12 @@ def qdrant_keepalive(event):
 
 @app.schedule(Rate(4, unit=Rate.DAYS))
 @notify_on_exception
-def refresh_suggested_prompts(event):
-    """Regenerate the empty-state starter prompts grounded in indexed Reddit content."""
+def refresh_suggestions(event):
+    """Regenerate the empty-state starter prompts grounded in indexed Reddit content.
+
+    Function name is intentionally short: Chalice derives the EventBridge rule
+    name as "<app>-<stage>-<func>-event", which AWS caps at 64 chars.
+    """
     from chalicelib.services.suggested_prompts import regenerate_prompts
 
     record = regenerate_prompts()
