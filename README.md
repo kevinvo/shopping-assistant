@@ -62,7 +62,10 @@ The application is built on AWS using a serverless architecture with the followi
 ├─────────────────────────────────────────────────────────────────┤
 │  • Vector DBs: Qdrant, Weaviate                                 │
 │  • Data Lake: S3 (raw/processed Reddit data)                    │
-│  • Metadata: DynamoDB (sessions, posts tracking)                │
+│  • Metadata: DynamoDB                                           │
+│      - WebSocketConnectionsV2  (live connection routing)        │
+│      - ConversationHistoriesV1 (per-conversation chat memory)   │
+│      - SessionsTableV2         (REST/cookie sessions)           │
 │  • Query Engine: Athena (data lake queries)                     │
 │  • Observability: LangSmith (query logs, retrieval metrics)     │
 │  • LLMs: DeepSeek (chat), Anthropic (Claude)                    │
@@ -96,6 +99,118 @@ The application is built on AWS using a serverless architecture with the followi
    - Reddit data transformation
    - Top posts processing
    - Daily aggregation jobs
+
+## Architecture Decisions
+
+This section captures load-bearing design choices that aren't obvious from the
+code alone. Each decision lists what we picked, the alternatives we considered,
+and why.
+
+### Anonymous identity = client-generated `session_id`
+
+The frontend (`chatting-assistant-front-end`) generates a UUID on first load
+and persists it in the browser's `localStorage` under
+`shopping-assistant-chat`. That UUID is sent to `$connect` as a query string:
+
+```
+wss://<api>.execute-api.<region>.amazonaws.com/<stage>?session_id=<uuid>
+```
+
+The backend reads it (`chalicelib/api/websocket.py:_extract_query_params`) and
+stores it on `ConnectionInfo`. If the client omits it, the server falls back
+to generating a UUID.
+
+**Lifetime:**
+
+| Layer                          | Lifetime                                      |
+| ------------------------------ | --------------------------------------------- |
+| Browser (`localStorage`)       | Until the user clears storage                 |
+| `ConnectionInfo` table         | 1-day TTL (live socket only)                  |
+| `ConversationHistoriesV1`      | 30-day rolling TTL (bumped on every save)     |
+
+**Why client-generated:** The previous design generated `session_id`
+server-side at every `$connect`, which meant a reload (= new connection) was a
+new identity. Putting the source of truth on the client makes the identity
+survive reloads and disconnects without any auth.
+
+**Why anonymous:** Product is pre-auth. When auth lands, it can either replace
+`session_id` with the user's account id or live alongside it.
+
+### Per-conversation chat memory in `ConversationHistoriesV1`
+
+Chat history is partitioned per `(session_id, conversation_id)` in a dedicated
+DynamoDB table.
+
+- **Partition key:** composite string `"<session_id>#<conversation_id>"`.
+- **TTL attribute:** `expiry_time`. **30-day rolling** — every save bumps it
+  forward, so idle threads garbage-collect themselves and active threads stay
+  alive indefinitely.
+- **Frontend role:** owns the conversation list (in `localStorage`) and picks
+  `conversation_id` for each thread.
+
+**What we replaced:** chat history used to live on `ConnectionInfo.chat_history`,
+keyed by `connection_id`. Disconnect deleted it; concurrent conversations
+shared one history. Both behaviors were the wrong contract for a multi-thread
+chat UI.
+
+**Alternatives considered:**
+
+- *Extend `SessionsTableV2`* (folding conversations under the existing
+  cookie-session record). Rejected: mixes REST session concerns with WS chat
+  state and risks the 400KB DDB item-size cap with long histories.
+- *Keep using `ConnectionInfo`, just bucket by `conversation_id` inside the
+  same record.* Rejected: still lost on disconnect.
+
+A GSI on `session_id` (for "list a user's conversations server-side") is
+intentionally **not** added — the frontend already lists conversations from
+`localStorage`. We can add it later if cross-device session restore becomes a
+requirement.
+
+### Streaming protocol echoes `conversationId`
+
+`message_start` / `message_chunk` / `message_end` carry both `messageId` and
+`conversationId`. The frontend uses these to route chunks into the
+originating conversation thread, even if the user switches threads
+mid-stream. Today's `messageId` defaults to the inbound `request_id`; the
+field is reserved for future use cases (multi-message turns, partial edits).
+
+### CI/CD: persist Chalice deployed state in S3
+
+`chalice deploy` tracks API Gateway and Lambda IDs in
+`chalice_app/.chalice/deployed/<stage>.json`. That path is gitignored, so a
+fresh CI checkout had no record of the existing API → Chalice would mint a
+brand-new WebSocket API Gateway on every deploy, and the cleanup script
+would delete the old one as orphaned. Effect: front-end broke on every
+backend deploy and we accumulated dozens of unused API Gateways.
+
+The workflow now:
+
+1. **Before cleanup:** `aws s3 cp s3://shopping-assistant-layers-ap-southeast-1/chalice-state/chalice-test.json …` into place. 404 on first run is treated as "no prior state."
+2. **After deploy:** uploads the freshly-written state back to the same key.
+3. The cleanup script reads the restored file to learn which API IDs are
+   active and skips them.
+
+**Effect:** API Gateway IDs stay stable across deploys. The frontend's
+hardcoded `WEBSOCKET_URL` constant doesn't need to be bumped on every deploy.
+
+**Why S3 and not git-tracking:** the deployed-state file contains ARNs and
+deployment metadata that we don't want versioned. S3 is a clean side channel
+that's already accessible to the deploy IAM principal (it already writes
+Lambda layer artifacts to the same bucket).
+
+### Backward-compat fallbacks (rollout-only)
+
+Two fallbacks exist to keep in-flight clients working during the deploy
+window. Both are scheduled for removal once logs confirm no misses:
+
+- `$message`: missing `sessionId` falls back to
+  `ConnectionInfo.session_id`; missing `conversationId` defaults to
+  `"default"`.
+- `MessagePayload.from_dict` tolerates SQS messages without the new fields
+  (legacy in-flight messages from before the schema bump).
+
+`ConnectionInfo.chat_history` is now dead weight (written empty on connect,
+never read or appended to) and will be removed in a follow-up cleanup.
 
 ## Prerequisites
 
@@ -526,6 +641,13 @@ The project uses GitHub Actions for continuous integration:
 - **Code Quality**: Black, Ruff, Bandit, MyPy
 - **Testing**: Pytest with coverage
 - **Deployment**: Automated deployments on merge to main
+- **Stable API Gateway IDs**: the workflow restores
+  `chalice_app/.chalice/deployed/<stage>.json` from
+  `s3://shopping-assistant-layers-ap-southeast-1/chalice-state/<stage>.json`
+  before running the cleanup step, and persists it back after a successful
+  Chalice deploy. This stops Chalice from minting a new WebSocket API on
+  every run. See *Architecture Decisions → CI/CD: persist Chalice deployed
+  state in S3* for the full rationale.
 
 See `.github/workflows/` for CI/CD configuration.
 
