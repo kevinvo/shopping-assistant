@@ -7,6 +7,7 @@ the application. Prompts are organized by domain:
 - personas: Main assistant personas and system identities
 - query_processing: Query rewriting and HyDE generation prompts
 - evaluation: LLM-as-judge evaluation prompts for quality assessment
+- suggested_prompts: Empty-state starter prompt generation
 """
 
 from chalicelib.prompts.personas import PERSONA
@@ -24,6 +25,10 @@ from chalicelib.prompts.evaluation import (
     RETRIEVAL_RELEVANCE_SYSTEM_PROMPT,
     RETRIEVAL_RELEVANCE_USER_PROMPT,
 )
+from chalicelib.prompts.suggested_prompts import (
+    SUGGESTED_PROMPTS_SYSTEM_PROMPT,
+    SUGGESTED_PROMPTS_USER_PROMPT,
+)
 
 __all__ = [
     # Personas
@@ -40,4 +45,7 @@ __all__ = [
     "ACTIONABILITY_USER_PROMPT",
     "RETRIEVAL_RELEVANCE_SYSTEM_PROMPT",
     "RETRIEVAL_RELEVANCE_USER_PROMPT",
+    # Suggested prompts (empty-state)
+    "SUGGESTED_PROMPTS_SYSTEM_PROMPT",
+    "SUGGESTED_PROMPTS_USER_PROMPT",
 ]

@@ -23,6 +23,10 @@ from chalicelib.aws.dynamo.tables import SuggestedPrompts
 from chalicelib.core.config import REDDIT_POSTS_TABLE_NAME
 from chalicelib.llm import LLMFactory, LLMProvider
 from chalicelib.models.data_objects import ChatMessage
+from chalicelib.prompts import (
+    SUGGESTED_PROMPTS_SYSTEM_PROMPT,
+    SUGGESTED_PROMPTS_USER_PROMPT,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +121,7 @@ def collect_grounding_signal(
 def build_llm_prompt(
     signal: GroundingSignal, *, target_count: int = TARGET_PROMPT_COUNT
 ) -> str:
-    """Build the user-message prompt for the LLM."""
+    """Fill the SUGGESTED_PROMPTS_USER_PROMPT template with the grounding signal."""
     subreddit_lines = (
         "\n".join(
             f"- {name} ({count} posts)" for name, count in signal.subreddit_counts
@@ -128,29 +132,11 @@ def build_llm_prompt(
         "\n".join(f'- "{t}"' for t in signal.sample_titles) or "- (no titles available)"
     )
 
-    return f"""You are designing {target_count} starter prompts for the empty-state of a
-shopping assistant powered by Reddit community recommendations.
-
-Indexed communities (most active first):
-{subreddit_lines}
-
-Recent post titles from those communities:
-{title_lines}
-
-Generate exactly {target_count} starter prompts a real customer might type
-into THIS assistant, where every prompt:
-- Maps to a product category that the indexed communities actually cover
-- Is 6-12 words, action-oriented, and specific
-- Avoids topics absent from the indexed communities
-- Mixes framings: budget-conscious, gift-finding, comparison, recommendation,
-  alternative-to-popular-brand
-- Is a question or imperative the user would say (no meta commentary)
-
-Return strictly valid JSON in this shape, with no prose, no markdown fences,
-no commentary outside the JSON:
-
-{{"prompts": ["...", "...", ..., "..."]}}
-"""
+    return SUGGESTED_PROMPTS_USER_PROMPT.format(
+        target_count=target_count,
+        subreddit_lines=subreddit_lines,
+        title_lines=title_lines,
+    )
 
 
 _JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
@@ -235,13 +221,7 @@ def regenerate_prompts(
     llm = LLMFactory.create_llm(provider=llm_provider)
     response_text = llm.chat(
         messages=[
-            ChatMessage(
-                role="system",
-                content=(
-                    "You output strictly valid JSON. No prose outside the "
-                    "JSON object. No markdown code fences."
-                ),
-            ),
+            ChatMessage(role="system", content=SUGGESTED_PROMPTS_SYSTEM_PROMPT),
             ChatMessage(role="user", content=user_prompt),
         ]
     )
