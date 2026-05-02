@@ -84,7 +84,10 @@ def websocket_connect(event):
         if not stage:
             stage = event.context.get("stage") if hasattr(event, "context") else None
 
-        from chalicelib.api.websocket import is_keep_warm_connection
+        from chalicelib.api.websocket import (
+            _extract_query_params,
+            is_keep_warm_connection,
+        )
 
         is_keep_warm = is_keep_warm_connection(event)
 
@@ -96,7 +99,11 @@ def websocket_connect(event):
                 stage=stage,
             )
         else:
-            handle_websocket_connect(connection_id=connection_id)
+            client_session_id = _extract_query_params(event).get("session_id")
+            handle_websocket_connect(
+                connection_id=connection_id,
+                session_id=client_session_id,
+            )
     except Exception as e:
         logger.error(f"Error in websocket_connect: {str(e)}", exc_info=True)
 

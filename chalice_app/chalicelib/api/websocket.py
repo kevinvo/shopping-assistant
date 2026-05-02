@@ -5,7 +5,7 @@ import logging
 import os
 import uuid
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Dict, Optional
 
 import boto3
 from botocore.exceptions import ClientError
@@ -22,10 +22,23 @@ logger.setLevel(logging.INFO)
 sqs_client = boto3.client("sqs")
 
 
+def _extract_query_params(event) -> Dict[str, str]:
+    """Pull query string parameters from a Chalice WebSocket event.
+
+    API Gateway puts these at the top level of the event dict for $connect; some
+    pre-existing internal calls put them under requestContext. Check both.
+    """
+    event_dict = getattr(event, "_event_dict", None) or {}
+    top_level = event_dict.get("queryStringParameters") or {}
+    nested = event_dict.get("requestContext", {}).get("queryStringParameters") or {}
+    merged: Dict[str, str] = {}
+    merged.update(nested)
+    merged.update(top_level)
+    return merged
+
+
 def is_keep_warm_connection(event) -> bool:
-    event_dict = event._event_dict
-    query_params = event_dict.get("requestContext", {}).get("queryStringParameters")
-    return query_params and query_params.get("keep-warm") == "1"
+    return _extract_query_params(event).get("keep-warm") == "1"
 
 
 def handle_websocket_connect(
@@ -33,6 +46,7 @@ def handle_websocket_connect(
     skip_db_write: bool = False,
     domain_name: Optional[str] = None,
     stage: Optional[str] = None,
+    session_id: Optional[str] = None,
 ) -> None:
     """Handle WebSocket connection logic."""
     logger.info("WebSocket connect event for connection: %s", connection_id)
@@ -64,8 +78,13 @@ def handle_websocket_connect(
 
     from chalicelib.aws.dynamo.tables import ConnectionInfo
 
-    session_id = str(uuid.uuid4())
-    logger.info("Generated session ID: %s", session_id)
+    if session_id:
+        logger.info("Using client-supplied session ID: %s", session_id)
+    else:
+        session_id = str(uuid.uuid4())
+        logger.info(
+            "No client session ID supplied, generated server-side: %s", session_id
+        )
 
     ttl = int((datetime.now() + timedelta(days=1)).timestamp())
     connection_info = ConnectionInfo(
@@ -160,8 +179,31 @@ def handle_websocket_message(
         logger.warning("No message content provided from connection %s", connection_id)
         return {"statusCode": 400}
 
+    # Resolve session_id / conversation_id from the inbound payload, with a
+    # rollout-window fallback to the server-stored session_id and a default
+    # conversation bucket. After the front-end is fully shipped, drop the
+    # fallback and 400 on missing fields.
+    inbound_session_id = (message_body.get("sessionId") or "").strip()
+    inbound_conversation_id = (message_body.get("conversationId") or "").strip()
+    inbound_message_id = (message_body.get("messageId") or "").strip()
+
+    session_id = inbound_session_id
+    conversation_id = inbound_conversation_id or "default"
+
+    if not session_id:
+        from chalicelib.aws.dynamo.tables import ConnectionInfo
+
+        connection_info = ConnectionInfo.get_by_id(id=connection_id)
+        session_id = (connection_info.session_id if connection_info else None) or ""
+        logger.warning(
+            "Inbound message missing sessionId; falling back to ConnectionInfo session_id=%s",
+            session_id,
+        )
+
     request_id = str(uuid.uuid4())
-    processing_response = ResponsePayload.create_processing(request_id=request_id)
+    processing_response = ResponsePayload.create_processing(
+        request_id=request_id, conversationId=conversation_id
+    )
 
     try:
         _send_websocket_message(
@@ -182,6 +224,9 @@ def handle_websocket_message(
         stage=stage,
         message=message_content,
         request_id=request_id,
+        session_id=session_id,
+        conversation_id=conversation_id,
+        message_id=inbound_message_id,
     )
     logger.info(
         "Created message payload for processing",

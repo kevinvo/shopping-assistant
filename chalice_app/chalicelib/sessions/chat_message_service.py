@@ -13,7 +13,7 @@ from chalicelib.models.data_objects import (
     ResponsePayload,
     EvaluationMessage,
 )
-from chalicelib.aws.dynamo.tables import ConnectionInfo
+from chalicelib.aws.dynamo.tables import ConnectionInfo, ConversationHistory
 from chalicelib.core.performance_timer import measure_execution_time
 from chalicelib.core.structured_logging import LogExtra
 
@@ -153,6 +153,26 @@ def persist_connection_info(connection_info: ConnectionInfo) -> None:
     connection_info.save()
 
 
+@measure_execution_time
+def load_or_create_conversation_history(
+    session_id: str, conversation_id: str
+) -> ConversationHistory:
+    history = ConversationHistory.get(
+        session_id=session_id, conversation_id=conversation_id
+    )
+    if history is None:
+        history = ConversationHistory.new(
+            session_id=session_id, conversation_id=conversation_id
+        )
+    return history
+
+
+@measure_execution_time
+def persist_conversation_history(history: ConversationHistory) -> None:
+    history.bump_expiry()
+    history.save()
+
+
 def process_message(message_payload: MessagePayload) -> None:
     """Process a chat message and send response via WebSocket."""
     connection_id = message_payload.connection_id
@@ -160,6 +180,8 @@ def process_message(message_payload: MessagePayload) -> None:
     stage = message_payload.stage
     user_message = message_payload.message
     request_id = message_payload.request_id
+    session_id = message_payload.session_id
+    conversation_id = message_payload.conversation_id or "default"
 
     logger.info(
         "Processing chat request",
@@ -168,7 +190,8 @@ def process_message(message_payload: MessagePayload) -> None:
             connection_id=connection_id,
             domain_name=domain_name,
             stage=stage,
-        ).to_dict(),
+        ).to_dict()
+        | {"session_id": session_id, "conversation_id": conversation_id},
     )
     logger.info(
         "Inbound chat payload",
@@ -187,41 +210,41 @@ def process_message(message_payload: MessagePayload) -> None:
         return
 
     try:
-        logger.info(
-            "Fetching connection info",
-            extra=LogExtra(
-                connection_id=connection_id, request_id=request_id
-            ).to_dict(),
-        )
         connection_info = get_connection_info(connection_id=connection_id)
         if connection_info is None:
             logger.warning(
                 f"Connection {connection_id} not found - likely disconnected. "
                 f"Skipping message processing for request {request_id}"
             )
-            # Don't try to send error message to non-existent connection
             return
-        logger.info(
-            "Loaded connection info",
-            extra=LogExtra(
-                connection_id=connection_id,
-                request_id=request_id,
-                chat_history_length=len(connection_info.chat_history),
-            ).to_dict(),
-        )
 
+        if not session_id:
+            session_id = getattr(connection_info, "session_id", None) or ""
+            logger.warning(
+                "MessagePayload missing session_id; rolled back to ConnectionInfo "
+                "session_id=%s for request %s",
+                session_id,
+                request_id,
+            )
+
+        if not session_id:
+            logger.error(
+                "Cannot resolve session_id for request %s — dropping message",
+                request_id,
+            )
+            return
+
+        history = load_or_create_conversation_history(
+            session_id=session_id, conversation_id=conversation_id
+        )
         logger.info(
-            "Invoking chat pipeline",
+            "Loaded conversation history",
             extra=LogExtra(
-                request_id=request_id,
                 connection_id=connection_id,
+                request_id=request_id,
+                chat_history_length=len(history.messages),
             ).to_dict()
-            | {
-                "session_id": getattr(connection_info, "session_id", None),
-                "history_sample": [
-                    h.to_dict() for h in connection_info.chat_history[-3:]
-                ],
-            },
+            | {"session_id": session_id, "conversation_id": conversation_id},
         )
 
         accumulated_response = []
@@ -245,7 +268,9 @@ def process_message(message_payload: MessagePayload) -> None:
             try:
                 if not start_sent[0]:
                     start_response = ResponsePayload.create_message_start(
-                        request_id=request_id, messageId=messageId
+                        request_id=request_id,
+                        messageId=messageId,
+                        conversationId=conversation_id,
                     )
                     send_message(
                         connection_id=connection_id,
@@ -256,7 +281,10 @@ def process_message(message_payload: MessagePayload) -> None:
                     start_sent[0] = True
 
                 chunk_response = ResponsePayload.create_message_chunk(
-                    request_id=request_id, content=chunk, messageId=messageId
+                    request_id=request_id,
+                    content=chunk,
+                    messageId=messageId,
+                    conversationId=conversation_id,
                 )
                 send_message(
                     connection_id=connection_id,
@@ -287,8 +315,8 @@ def process_message(message_payload: MessagePayload) -> None:
 
         response_message, updated_chat_history, eval_metadata = Chat().process_chat(
             query=user_message,
-            session_id=connection_id,
-            chat_history=[hist.to_dict() for hist in connection_info.chat_history],
+            session_id=session_id,
+            chat_history=[hist.to_dict() for hist in history.messages],
             socket_id=connection_id,
             request_id=request_id,
             streaming_callback=streaming_callback,
@@ -299,8 +327,8 @@ def process_message(message_payload: MessagePayload) -> None:
         else:
             full_response = response_message
 
-        connection_info.chat_history = updated_chat_history
-        persist_connection_info(connection_info=connection_info)
+        history.messages = updated_chat_history
+        persist_conversation_history(history=history)
 
         if not connection_valid[0]:
             logger.warning(
@@ -318,7 +346,9 @@ def process_message(message_payload: MessagePayload) -> None:
                 try:
                     if start_sent[0]:
                         end_response = ResponsePayload.create_message_end(
-                            request_id=request_id, messageId=messageId
+                            request_id=request_id,
+                            messageId=messageId,
+                            conversationId=conversation_id,
                         )
                         send_message(
                             connection_id=connection_id,
