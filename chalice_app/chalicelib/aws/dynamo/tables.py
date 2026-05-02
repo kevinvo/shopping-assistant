@@ -6,7 +6,7 @@ import logging
 from typing import Dict, Any, List, Optional, ClassVar, Type, TypeVar
 from chalicelib.models.data_objects import ChatMessage
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +30,12 @@ CONNECTIONS_TABLE_NAME = os.environ.get(
 )
 
 SESSIONS_TABLE_V2_NAME = os.environ.get("SESSIONS_TABLE_V2_NAME", "SessionsTableV2")
+
+CONVERSATION_HISTORIES_TABLE_NAME = os.environ.get(
+    "CONVERSATION_HISTORIES_TABLE_NAME", "ConversationHistoriesV1"
+)
+
+CONVERSATION_HISTORY_TTL_DAYS = 30
 
 T = TypeVar("T", bound="DynamoDBStorageQueryMixin")
 
@@ -171,4 +177,70 @@ class SessionInfo(DynamoDBStorageQueryMixin):
             id=data.get("id", ""),
             data=session_data,
             expiry_time=data.get("expiry_time", 0),
+        )
+
+
+def conversation_history_id(session_id: str, conversation_id: str) -> str:
+    """Composite key for ConversationHistory."""
+    return f"{session_id}#{conversation_id}"
+
+
+@dataclass
+class ConversationHistory(DynamoDBStorageQueryMixin):
+    """Per-conversation chat history keyed by <session_id>#<conversation_id>."""
+
+    id: str
+    session_id: str
+    conversation_id: str
+    last_active: str
+    expiry_time: int
+    messages: List[ChatMessage] = field(default_factory=list)
+    dynamo_table_name: ClassVar[str] = CONVERSATION_HISTORIES_TABLE_NAME
+
+    def __post_init__(self):
+        if isinstance(self.messages, list):
+            processed: List[ChatMessage] = []
+            for msg in self.messages:
+                if isinstance(msg, dict):
+                    processed.append(ChatMessage.from_dict(msg))
+                elif isinstance(msg, ChatMessage):
+                    processed.append(msg)
+            self.messages = processed
+
+    def to_item(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "session_id": self.session_id,
+            "conversation_id": self.conversation_id,
+            "last_active": self.last_active,
+            "expiry_time": self.expiry_time,
+            "messages": [m.to_dict() for m in self.messages],
+        }
+
+    def bump_expiry(self) -> None:
+        """Refresh last_active to now and push expiry_time CONVERSATION_HISTORY_TTL_DAYS forward."""
+        now = datetime.now()
+        self.last_active = now.isoformat()
+        self.expiry_time = int(
+            (now + timedelta(days=CONVERSATION_HISTORY_TTL_DAYS)).timestamp()
+        )
+
+    @classmethod
+    def get(
+        cls, session_id: str, conversation_id: str
+    ) -> Optional["ConversationHistory"]:
+        return cls.get_by_id(id=conversation_history_id(session_id, conversation_id))
+
+    @classmethod
+    def new(cls, session_id: str, conversation_id: str) -> "ConversationHistory":
+        now = datetime.now()
+        return cls(
+            id=conversation_history_id(session_id, conversation_id),
+            session_id=session_id,
+            conversation_id=conversation_id,
+            last_active=now.isoformat(),
+            expiry_time=int(
+                (now + timedelta(days=CONVERSATION_HISTORY_TTL_DAYS)).timestamp()
+            ),
+            messages=[],
         )

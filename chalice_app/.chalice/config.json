@@ -7,6 +7,7 @@
       "environment_variables": {
         "SESSIONS_TABLE_V2_NAME": "SessionsTableV2",
         "CONNECTIONS_TABLE_NAME": "WebSocketConnectionsV2",
+        "CONVERSATION_HISTORIES_TABLE_NAME": "ConversationHistoriesV1",
         "ENVIRONMENT": "dev",
         "LOG_LEVEL": "DEBUG",
         "SCRAPER_STATE_MACHINE_ARN": "arn:aws:states:ap-southeast-1:000000000000:stateMachine:dev-shopping-assistant-scraper",
@@ -27,6 +28,7 @@
       "environment_variables": {
         "SESSIONS_TABLE_V2_NAME": "SessionsTableV2",
         "CONNECTIONS_TABLE_NAME": "WebSocketConnectionsV2",
+        "CONVERSATION_HISTORIES_TABLE_NAME": "ConversationHistoriesV1",
         "QDRANT_COLLECTION_NAME": "reddit_posts",
         "CHAT_PROCESSING_QUEUE_URL": "https://sqs.ap-southeast-1.amazonaws.com/979920756619/ChatProcessingQueue",
         "EVALUATION_QUEUE_URL": "https://sqs.ap-southeast-1.amazonaws.com/979920756619/shopping-assistant-evaluation-queue",
@@ -63,6 +65,7 @@
       "environment_variables": {
         "SESSIONS_TABLE_V2_NAME": "SessionsTableV2-prod",
         "CONNECTIONS_TABLE_NAME": "WebSocketConnectionsV2-prod",
+        "CONVERSATION_HISTORIES_TABLE_NAME": "ConversationHistoriesV1-prod",
         "QDRANT_COLLECTION_NAME": "reddit_posts_prod",
         "CHAT_PROCESSING_QUEUE_URL": "INJECTED_BY_DEPLOY",
         "EVALUATION_QUEUE_URL": "INJECTED_BY_DEPLOY",

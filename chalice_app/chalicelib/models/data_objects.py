@@ -290,6 +290,9 @@ class MessagePayload:
     message: str
     request_id: str
     timestamp: str
+    session_id: str = ""
+    conversation_id: str = ""
+    message_id: str = ""
 
     @classmethod
     def from_dict(cls, data: dict) -> "MessagePayload":
@@ -301,6 +304,9 @@ class MessagePayload:
             message=data.get("message", ""),
             request_id=data.get("request_id", ""),
             timestamp=data.get("timestamp", ""),
+            session_id=data.get("session_id", ""),
+            conversation_id=data.get("conversation_id", ""),
+            message_id=data.get("message_id", ""),
         )
 
     def to_dict(self) -> dict:
@@ -320,6 +326,9 @@ class MessagePayload:
         stage: str,
         message: str,
         request_id: str,
+        session_id: str = "",
+        conversation_id: str = "",
+        message_id: str = "",
     ) -> "MessagePayload":
         """Create a new MessagePayload with the current timestamp."""
         return cls(
@@ -329,6 +338,9 @@ class MessagePayload:
             message=message,
             request_id=request_id,
             timestamp=datetime.now().isoformat(),
+            session_id=session_id,
+            conversation_id=conversation_id,
+            message_id=message_id,
         )
 
 
@@ -341,6 +353,7 @@ class ResponsePayload:
     request_id: str
     timestamp: str
     messageId: Optional[str] = None
+    conversationId: Optional[str] = None
 
     @classmethod
     def from_dict(cls, data: dict) -> "ResponsePayload":
@@ -351,6 +364,7 @@ class ResponsePayload:
             request_id=data.get("request_id", ""),
             timestamp=data.get("timestamp", ""),
             messageId=data.get("messageId"),
+            conversationId=data.get("conversationId"),
         )
 
     def to_dict(self) -> dict:
@@ -358,6 +372,8 @@ class ResponsePayload:
         result = asdict(self)
         if result.get("messageId") is None:
             result.pop("messageId", None)
+        if result.get("conversationId") is None:
+            result.pop("conversationId", None)
         return result
 
     def to_json(self) -> str:
@@ -366,7 +382,11 @@ class ResponsePayload:
 
     @classmethod
     def create_processing(
-        cls, *, request_id: str, content: str = "Your request is being processed..."
+        cls,
+        *,
+        request_id: str,
+        content: str = "Your request is being processed...",
+        conversationId: Optional[str] = None,
     ) -> "ResponsePayload":
         """Create a new processing response with the current timestamp."""
         return cls(
@@ -374,16 +394,24 @@ class ResponsePayload:
             content=content,
             request_id=request_id,
             timestamp=datetime.now().isoformat(),
+            conversationId=conversationId,
         )
 
     @classmethod
-    def create_message(cls, *, request_id: str, content: str) -> "ResponsePayload":
+    def create_message(
+        cls,
+        *,
+        request_id: str,
+        content: str,
+        conversationId: Optional[str] = None,
+    ) -> "ResponsePayload":
         """Create a new message response with the current timestamp."""
         return cls(
             type=MessageType.MESSAGE,
             content=content,
             request_id=request_id,
             timestamp=datetime.now().isoformat(),
+            conversationId=conversationId,
         )
 
     @classmethod
@@ -392,6 +420,7 @@ class ResponsePayload:
         *,
         request_id: str,
         content: str = "Sorry, there was an error processing your request.",
+        conversationId: Optional[str] = None,
     ) -> "ResponsePayload":
         """Create a new error response with the current timestamp."""
         return cls(
@@ -399,11 +428,16 @@ class ResponsePayload:
             content=content,
             request_id=request_id,
             timestamp=datetime.now().isoformat(),
+            conversationId=conversationId,
         )
 
     @classmethod
     def create_message_start(
-        cls, *, request_id: str, messageId: str
+        cls,
+        *,
+        request_id: str,
+        messageId: str,
+        conversationId: Optional[str] = None,
     ) -> "ResponsePayload":
         return cls(
             type=MessageType.MESSAGE_START,
@@ -411,11 +445,17 @@ class ResponsePayload:
             request_id=request_id,
             timestamp=datetime.now().isoformat(),
             messageId=messageId,
+            conversationId=conversationId,
         )
 
     @classmethod
     def create_message_chunk(
-        cls, *, request_id: str, content: str, messageId: str
+        cls,
+        *,
+        request_id: str,
+        content: str,
+        messageId: str,
+        conversationId: Optional[str] = None,
     ) -> "ResponsePayload":
         return cls(
             type=MessageType.MESSAGE_CHUNK,
@@ -423,11 +463,16 @@ class ResponsePayload:
             request_id=request_id,
             timestamp=datetime.now().isoformat(),
             messageId=messageId,
+            conversationId=conversationId,
         )
 
     @classmethod
     def create_message_end(
-        cls, *, request_id: str, messageId: str
+        cls,
+        *,
+        request_id: str,
+        messageId: str,
+        conversationId: Optional[str] = None,
     ) -> "ResponsePayload":
         return cls(
             type=MessageType.MESSAGE_END,
@@ -435,4 +480,5 @@ class ResponsePayload:
             request_id=request_id,
             timestamp=datetime.now().isoformat(),
             messageId=messageId,
+            conversationId=conversationId,
         )

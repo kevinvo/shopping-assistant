@@ -282,6 +282,20 @@ class ShoppingAssistantInfrastructureStack(Stack):
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
         )
 
+        # Per-conversation chat history, keyed by "<session_id>#<conversation_id>".
+        # 30-day rolling TTL bumped on every save by the chat worker.
+        self.conversation_histories_table = dynamodb.Table(
+            self,
+            "ConversationHistoriesV1",
+            table_name=f"ConversationHistoriesV1{self.resource_suffix}",
+            partition_key=dynamodb.Attribute(
+                name="id", type=dynamodb.AttributeType.STRING
+            ),
+            time_to_live_attribute="expiry_time",
+            removal_policy=stateful_removal_policy,
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+        )
+
         # Export key resource values to SSM for use by deploy scripts
         self._export_resources_to_ssm()
 
@@ -309,6 +323,7 @@ class ShoppingAssistantInfrastructureStack(Stack):
         exports = {
             "sessions-table-name": self.sessions_table_v2.table_name,
             "connections-table-name": self.connections_table.table_name,
+            "conversation-histories-table-name": self.conversation_histories_table.table_name,
             "chat-queue-url": self.chat_processing_queue.queue_url,
             "eval-queue-url": self.evaluation_queue.queue_url,
             "sns-alert-arn": self.alerts_topic.topic_arn,
