@@ -37,6 +37,13 @@ CONVERSATION_HISTORIES_TABLE_NAME = os.environ.get(
 
 CONVERSATION_HISTORY_TTL_DAYS = 30
 
+SUGGESTED_PROMPTS_TABLE_NAME = os.environ.get(
+    "SUGGESTED_PROMPTS_TABLE_NAME", "SuggestedPromptsV1"
+)
+
+# Single global record id used by SuggestedPrompts.
+SUGGESTED_PROMPTS_GLOBAL_ID = "global"
+
 T = TypeVar("T", bound="DynamoDBStorageQueryMixin")
 
 
@@ -243,4 +250,43 @@ class ConversationHistory(DynamoDBStorageQueryMixin):
                 (now + timedelta(days=CONVERSATION_HISTORY_TTL_DAYS)).timestamp()
             ),
             messages=[],
+        )
+
+
+@dataclass
+class SuggestedPrompts(DynamoDBStorageQueryMixin):
+    """Cached starter prompts for the empty-state UI.
+
+    Persisted as a single record with id="global". The suggested_prompts cron
+    overwrites this every 4 days using LLM output grounded in the indexed
+    Reddit content, and the public REST endpoint reads it on demand.
+    """
+
+    id: str
+    prompts: List[str]
+    generated_at: str
+    sources_used: List[str] = field(default_factory=list)
+    dynamo_table_name: ClassVar[str] = SUGGESTED_PROMPTS_TABLE_NAME
+
+    def to_item(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "prompts": list(self.prompts),
+            "generated_at": self.generated_at,
+            "sources_used": list(self.sources_used),
+        }
+
+    @classmethod
+    def load(cls) -> Optional["SuggestedPrompts"]:
+        return cls.get_by_id(id=SUGGESTED_PROMPTS_GLOBAL_ID)
+
+    @classmethod
+    def new(
+        cls, prompts: List[str], sources_used: Optional[List[str]] = None
+    ) -> "SuggestedPrompts":
+        return cls(
+            id=SUGGESTED_PROMPTS_GLOBAL_ID,
+            prompts=list(prompts),
+            generated_at=datetime.now().isoformat(),
+            sources_used=list(sources_used or []),
         )

@@ -26,7 +26,8 @@
         "arn:aws:dynamodb:*:*:table/SessionsTable-prod",
         "arn:aws:dynamodb:*:*:table/SessionsTableV2-prod",
         "arn:aws:dynamodb:*:*:table/WebSocketConnectionsV2-prod",
-        "arn:aws:dynamodb:*:*:table/ConversationHistoriesV1-prod"
+        "arn:aws:dynamodb:*:*:table/ConversationHistoriesV1-prod",
+        "arn:aws:dynamodb:*:*:table/SuggestedPromptsV1-prod"
       ]
     },
     {

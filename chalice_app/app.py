@@ -405,3 +405,19 @@ def qdrant_keepalive(event):
         "Qdrant keep-alive completed",
         extra={"result": result},
     )
+
+
+@app.schedule(Rate(4, unit=Rate.DAYS))
+@notify_on_exception
+def refresh_suggested_prompts(event):
+    """Regenerate the empty-state starter prompts grounded in indexed Reddit content."""
+    from chalicelib.services.suggested_prompts import regenerate_prompts
+
+    record = regenerate_prompts()
+    logger.info(
+        "Refreshed suggested prompts",
+        extra={
+            "count": len(record.prompts),
+            "sources": record.sources_used,
+        },
+    )
