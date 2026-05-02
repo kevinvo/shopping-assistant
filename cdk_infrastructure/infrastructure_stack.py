@@ -296,6 +296,21 @@ class ShoppingAssistantInfrastructureStack(Stack):
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
         )
 
+        # Cached starter prompts for the empty-state UI. A single global record
+        # (id="global") is overwritten by the suggested_prompts cron every 4 days.
+        # No TTL — stale prompts are still better than an empty homepage if the
+        # cron fails. The cron-failure path is alarmed via SNS (notify_on_exception).
+        self.suggested_prompts_table = dynamodb.Table(
+            self,
+            "SuggestedPromptsV1",
+            table_name=f"SuggestedPromptsV1{self.resource_suffix}",
+            partition_key=dynamodb.Attribute(
+                name="id", type=dynamodb.AttributeType.STRING
+            ),
+            removal_policy=stateful_removal_policy,
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+        )
+
         # Export key resource values to SSM for use by deploy scripts
         self._export_resources_to_ssm()
 
@@ -324,6 +339,7 @@ class ShoppingAssistantInfrastructureStack(Stack):
             "sessions-table-name": self.sessions_table_v2.table_name,
             "connections-table-name": self.connections_table.table_name,
             "conversation-histories-table-name": self.conversation_histories_table.table_name,
+            "suggested-prompts-table-name": self.suggested_prompts_table.table_name,
             "chat-queue-url": self.chat_processing_queue.queue_url,
             "eval-queue-url": self.evaluation_queue.queue_url,
             "sns-alert-arn": self.alerts_topic.topic_arn,

@@ -28,6 +28,16 @@ cors_config = CORSConfig(
 )
 
 
+# Public, read-only endpoints. No credentials → wildcard origin is the right
+# default; the response is identical for every caller anyway.
+public_cors_config = CORSConfig(
+    allow_origin="*",
+    allow_headers=["Content-Type"],
+    allow_credentials=False,
+    max_age=86400,
+)
+
+
 session_handler = SessionHandler()
 
 
@@ -157,3 +167,29 @@ def register_rest_routes(app):
         """Health check endpoint."""
 
         return {"status": "healthy", "service": "shopping-assistant-api"}
+
+    @app.route("/suggested-prompts", methods=["GET"], cors=public_cors_config)
+    @notify_on_exception
+    def suggested_prompts():
+        """Return the cached starter prompts pool used by the empty-state UI."""
+
+        from chalicelib.services.suggested_prompts import load_or_default
+
+        try:
+            prompts = load_or_default()
+            return Response(
+                body={"prompts": prompts},
+                status_code=200,
+                headers={
+                    "Content-Type": "application/json",
+                    # 1-hour browser cache; the table only changes every 4 days.
+                    "Cache-Control": "public, max-age=3600",
+                },
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("Error loading suggested prompts: %s", exc, exc_info=True)
+            return Response(
+                body={"error": "Failed to load suggested prompts"},
+                status_code=500,
+                headers={"Content-Type": "application/json"},
+            )
