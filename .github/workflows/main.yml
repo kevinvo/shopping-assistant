@@ -100,6 +100,20 @@ jobs:
       run: |
         python .github/scripts/prune_lambda_policy.py --stage chalice-test --region ${{ env.AWS_REGION }}
     
+    - name: Restore Chalice deployed state from S3
+      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      working-directory: chalice_app
+      run: |
+        mkdir -p .chalice/deployed
+        if aws s3 cp \
+            s3://shopping-assistant-layers-ap-southeast-1/chalice-state/chalice-test.json \
+            .chalice/deployed/chalice-test.json \
+            --region ${{ env.AWS_REGION }}; then
+          echo "Restored Chalice deployed state — API IDs will be reused."
+        else
+          echo "No prior Chalice deployed state in S3 (first run or wiped) — Chalice will mint a new API."
+        fi
+
     - name: Cleanup Unused API Gateway REST APIs
       if: github.ref == 'refs/heads/main' && github.event_name == 'push'
       working-directory: chalice_app
@@ -118,6 +132,21 @@ jobs:
       if: github.ref == 'refs/heads/main' && github.event_name == 'push'
       run: |
         python chalice_app/scripts/deploy.py --stage chalice-test --region ${{ env.AWS_REGION }}
+
+    - name: Persist Chalice deployed state to S3
+      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      working-directory: chalice_app
+      run: |
+        if [ -f .chalice/deployed/chalice-test.json ]; then
+          aws s3 cp \
+            .chalice/deployed/chalice-test.json \
+            s3://shopping-assistant-layers-ap-southeast-1/chalice-state/chalice-test.json \
+            --region ${{ env.AWS_REGION }}
+          echo "Persisted Chalice deployed state to S3."
+        else
+          echo "::error::No deployed state file at .chalice/deployed/chalice-test.json after deploy."
+          exit 1
+        fi
 
     - name: Verify Layer Attachment
       if: github.ref == 'refs/heads/main' && github.event_name == 'push'
