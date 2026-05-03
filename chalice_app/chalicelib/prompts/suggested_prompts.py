@@ -16,20 +16,19 @@ SUGGESTED_PROMPTS_USER_PROMPT = """
 You are designing {target_count} starter prompts for the empty-state of a
 shopping assistant powered by Reddit community recommendations.
 
-Indexed communities (most active first):
+The assistant has indexed posts and discussions from these communities:
 {subreddit_lines}
-
-Recent post titles from those communities:
-{title_lines}
 
 Generate exactly {target_count} starter prompts a real customer might type
 into THIS assistant, where every prompt:
-- Maps to a product category that the indexed communities actually cover
+- Maps to a product category these communities actually cover
 - Is 6-12 words, action-oriented, and specific
-- Avoids topics absent from the indexed communities
+- Avoids topics absent from these communities
 - Mixes framings: budget-conscious, gift-finding, comparison, recommendation,
   alternative-to-popular-brand
 - Is a question or imperative the user would say (no meta commentary)
+- Spreads roughly evenly across distinct product categories represented in the
+  community list (don't cluster all prompts in one niche)
 
 Return strictly valid JSON in this shape, with no prose, no markdown fences,
 no commentary outside the JSON:

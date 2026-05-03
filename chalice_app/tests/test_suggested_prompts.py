@@ -1,72 +1,39 @@
 """Unit tests for the suggested-prompts generation pipeline."""
 
 import json
-import random
 
 import pytest
 
 from chalicelib.services import suggested_prompts as sp
 
 
-def _items(*pairs):
-    return [{"subreddit": s, "title": t} for s, t in pairs]
-
-
 # ---------------------------------------------------------------------------
-# collect_grounding_signal — distribution + ranking
+# collect_grounding_signal
 # ---------------------------------------------------------------------------
 
 
-def test_collect_grounding_ranks_subreddits_by_count():
-    items = _items(
-        ("BuyItForLife", "boots"),
-        ("BuyItForLife", "knives"),
-        ("BuyItForLife", "pens"),
-        ("malefashionadvice", "jeans"),
-        ("malefashionadvice", "denim"),
-        ("HeadphoneAdvice", "iems"),
-    )
-    signal = sp.collect_grounding_signal(items=items, top_k=3, sample_k=10)
+def test_collect_grounding_defaults_to_curated_subreddit_list():
+    signal = sp.collect_grounding_signal()
 
-    assert [name for name, _ in signal.subreddit_counts] == [
-        "BuyItForLife",
-        "malefashionadvice",
-        "HeadphoneAdvice",
-    ]
-    assert dict(signal.subreddit_counts)["BuyItForLife"] == 3
+    assert signal.subreddits == sp.INDEXED_SUBREDDITS
+    assert not signal.is_empty
 
 
-def test_collect_grounding_caps_top_k():
-    # 5 distinct subreddits, top_k=2 → only the two heaviest survive
-    items = _items(*[(f"sub{i}", f"t{i}") for i in range(5)])
-    items += _items(("sub0", "x"), ("sub0", "y"), ("sub1", "x"))
-    signal = sp.collect_grounding_signal(items=items, top_k=2, sample_k=5)
+def test_collect_grounding_accepts_explicit_list():
+    signal = sp.collect_grounding_signal(subreddits=["a", "b", "c"])
 
-    assert len(signal.subreddit_counts) == 2
-    assert {name for name, _ in signal.subreddit_counts} == {"sub0", "sub1"}
+    assert signal.subreddits == ["a", "b", "c"]
 
 
-def test_collect_grounding_titles_only_from_top_subreddits():
-    items = _items(
-        ("popular", "title-A"),
-        ("popular", "title-B"),
-        ("popular", "title-C"),
-        ("rare", "ignored-D"),
-    )
-    rng = random.Random(0)
-    signal = sp.collect_grounding_signal(items=items, top_k=1, sample_k=10, rng=rng)
+def test_collect_grounding_strips_blanks_and_whitespace():
+    signal = sp.collect_grounding_signal(subreddits=["  buyitforlife ", "", "   "])
 
-    assert signal.sample_titles == ["title-A", "title-B", "title-C"] or set(
-        signal.sample_titles
-    ) == {"title-A", "title-B", "title-C"}
-    assert "ignored-D" not in signal.sample_titles
+    assert signal.subreddits == ["buyitforlife"]
 
 
-def test_collect_grounding_skips_blank_subreddit():
-    items = _items(("", "blank"), ("real", "ok"))
-    signal = sp.collect_grounding_signal(items=items, top_k=5, sample_k=5)
-
-    assert [name for name, _ in signal.subreddit_counts] == ["real"]
+def test_collect_grounding_is_empty_when_all_blank():
+    assert sp.collect_grounding_signal(subreddits=["", "  "]).is_empty
+    assert sp.collect_grounding_signal(subreddits=[]).is_empty
 
 
 # ---------------------------------------------------------------------------
@@ -74,25 +41,20 @@ def test_collect_grounding_skips_blank_subreddit():
 # ---------------------------------------------------------------------------
 
 
-def test_build_llm_prompt_embeds_communities_and_titles():
-    signal = sp.GroundingSignal(
-        subreddit_counts=[("BuyItForLife", 12), ("HeadphoneAdvice", 7)],
-        sample_titles=["Best $100 chef's knife?", "Looking for waterproof boots"],
-    )
+def test_build_llm_prompt_embeds_subreddits_with_r_prefix():
+    signal = sp.GroundingSignal(subreddits=["BuyItForLife", "headphones"])
     prompt = sp.build_llm_prompt(signal, target_count=24)
 
-    assert "BuyItForLife (12 posts)" in prompt
-    assert "HeadphoneAdvice (7 posts)" in prompt
-    assert "Best $100 chef's knife?" in prompt
+    assert "- r/BuyItForLife" in prompt
+    assert "- r/headphones" in prompt
     assert "exactly 24 starter prompts" in prompt
 
 
 def test_build_llm_prompt_handles_empty_signal_gracefully():
-    signal = sp.GroundingSignal(subreddit_counts=[], sample_titles=[])
+    signal = sp.GroundingSignal(subreddits=[])
     prompt = sp.build_llm_prompt(signal)
 
     assert "(no community signal available)" in prompt
-    assert "(no titles available)" in prompt
 
 
 # ---------------------------------------------------------------------------
@@ -186,12 +148,6 @@ class _FakeLLM:
 
 
 def test_regenerate_prompts_persists_validated_set(monkeypatch):
-    items = _items(
-        ("BuyItForLife", "Best $100 chef's knife"),
-        ("BuyItForLife", "Waterproof hiking boots that last"),
-        ("HeadphoneAdvice", "Budget alternative to QC45?"),
-        ("HeadphoneAdvice", "IEMs under $200"),
-    )
     payload = json.dumps(
         {"prompts": [f"Solid prompt number {i} for shoppers" for i in range(20)]}
     )
@@ -205,13 +161,32 @@ def test_regenerate_prompts_persists_validated_set(monkeypatch):
         lambda self: saved.append(self) or self,
     )
 
-    record = sp.regenerate_prompts(raw_items=items, rng=random.Random(0))
+    record = sp.regenerate_prompts(subreddits=["buyitforlife", "headphones"])
 
     assert record.prompts[:20] == [
         f"Solid prompt number {i} for shoppers" for i in range(20)
     ]
-    assert record.sources_used  # at least one source recorded
+    assert record.sources_used == ["buyitforlife", "headphones"]
     assert len(saved) == 1
+
+
+def test_regenerate_prompts_uses_default_subreddits_when_omitted(monkeypatch):
+    payload = json.dumps(
+        {"prompts": [f"Solid prompt number {i} for shoppers" for i in range(18)]}
+    )
+    fake_llm = _FakeLLM(payload)
+    monkeypatch.setattr(sp.LLMFactory, "create_llm", lambda *a, **k: fake_llm)
+    monkeypatch.setattr(sp.SuggestedPrompts, "save", lambda self: self)
+
+    record = sp.regenerate_prompts()
+
+    assert record.sources_used == sp.INDEXED_SUBREDDITS
+    # And the LLM saw the subreddit names embedded in its user prompt.
+    user_message = next(
+        m for m in fake_llm.calls[0] if getattr(m, "role", None) == "user"
+    )
+    for name in sp.INDEXED_SUBREDDITS[:5]:
+        assert f"- r/{name}" in user_message.content
 
 
 def test_regenerate_prompts_aborts_when_signal_empty(monkeypatch):
@@ -222,11 +197,10 @@ def test_regenerate_prompts_aborts_when_signal_empty(monkeypatch):
     )
 
     with pytest.raises(RuntimeError):
-        sp.regenerate_prompts(raw_items=[])
+        sp.regenerate_prompts(subreddits=[])
 
 
 def test_regenerate_prompts_aborts_when_too_few_pass_validation(monkeypatch):
-    items = _items(("BuyItForLife", "title"))
     payload = json.dumps(
         {"prompts": [f"prompt number {i}" for i in range(5)]}  # below MIN_ACCEPTABLE
     )
@@ -239,7 +213,7 @@ def test_regenerate_prompts_aborts_when_too_few_pass_validation(monkeypatch):
     )
 
     with pytest.raises(ValueError):
-        sp.regenerate_prompts(raw_items=items)
+        sp.regenerate_prompts(subreddits=["x"])
 
     assert saved == []  # never persisted, previous record kept intact
 
