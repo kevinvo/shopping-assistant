@@ -1,26 +1,25 @@
 """Generate and persist starter prompts for the empty-state UI.
 
-The cron pulls a grounding signal from the indexed Reddit content (top
-subreddits + sampled post titles), feeds it to the LLM along with formatting
-constraints, parses the JSON response, validates it, and overwrites the single
-global SuggestedPrompts record. Stale prompts are kept on validation failure
-so the homepage never goes blank when a regen run hiccups.
+The cron passes a list of indexed subreddit names to the LLM, asks for a
+grounded pool of starter prompts, validates the JSON response, and overwrites
+the single global SuggestedPrompts record. Stale prompts are kept on
+validation failure so the homepage never goes blank when a regen run hiccups.
+
+The grounding signal is intentionally lightweight: just the names of the
+communities the assistant has indexed. Adding post titles or vector samples
+would give richer signal but the names alone already pin the LLM to product
+categories the system can actually answer.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import random
 import re
-from collections import Counter
 from dataclasses import dataclass
 from typing import List, Optional, Sequence
 
-import boto3
-
 from chalicelib.aws.dynamo.tables import SuggestedPrompts
-from chalicelib.core.config import REDDIT_POSTS_TABLE_NAME
 from chalicelib.llm import LLMFactory, LLMProvider
 from chalicelib.models.data_objects import ChatMessage
 from chalicelib.prompts import (
@@ -31,111 +30,93 @@ from chalicelib.prompts import (
 logger = logging.getLogger(__name__)
 
 
-TOP_SUBREDDITS_K = 20
-SAMPLE_TITLES_K = 30
 TARGET_PROMPT_COUNT = 24
 MIN_ACCEPTABLE_PROMPTS = 16  # below this we keep the previous record
-SCAN_PAGE_LIMIT = 500
+
+
+# Subreddits the indexer has data for. Update this when you add or remove
+# communities from the scrape pipeline. Discovered initially from the S3 raw
+# zone partition layout (s3://shopping-assistant-raw-reddit-data/top_posts/).
+INDEXED_SUBREDDITS: List[str] = [
+    "SkincareAddiction",
+    "android",
+    "apple",
+    "askhistorians",
+    "backpacks",
+    "beauty",
+    "buildapcsales",
+    "buyitforlife",
+    "coffee",
+    "cooking",
+    "deals",
+    "diy",
+    "edc",
+    "femalefashionadvice",
+    "frugal",
+    "frugalliving",
+    "frugalmalefashion",
+    "gadgets",
+    "gamedeals",
+    "gaming",
+    "gamingdeals",
+    "goodvalue",
+    "headphones",
+    "homeautomation",
+    "homeimprovement",
+    "interiordesign",
+    "ios",
+    "malefashionadvice",
+    "mealprepsunday",
+    "minimalism",
+    "personalfinance",
+    "productivity",
+    "rawdenim",
+    "shutupandtakemymoney",
+    "smarthome",
+    "suggestalaptop",
+    "techsupport",
+    "thriftstorehauls",
+    "travelhacks",
+    "whatisthisthing",
+    "zerowaste",
+]
 
 
 @dataclass
 class GroundingSignal:
-    """Snapshot of indexed content used to seed the LLM prompt."""
+    """List of indexed subreddit names used to seed the LLM prompt."""
 
-    subreddit_counts: List[tuple]  # [(name, count), ...] ordered desc
-    sample_titles: List[str]
+    subreddits: List[str]
 
     @property
     def is_empty(self) -> bool:
-        return not self.subreddit_counts and not self.sample_titles
-
-
-def _scan_reddit_posts(
-    table_name: str = REDDIT_POSTS_TABLE_NAME,
-    page_limit: int = SCAN_PAGE_LIMIT,
-    max_pages: int = 4,
-) -> List[dict]:
-    """Scan reddit-posts DDB table for grounding signal.
-
-    Bounded by max_pages to keep the cron cheap; we don't need every row,
-    just enough variety to characterize the catalog.
-    """
-    table = boto3.resource("dynamodb").Table(table_name)
-    items: List[dict] = []
-    last_key = None
-    for _ in range(max_pages):
-        kwargs = {
-            "Limit": page_limit,
-            "ProjectionExpression": "subreddit, title",
-        }
-        if last_key:
-            kwargs["ExclusiveStartKey"] = last_key
-        response = table.scan(**kwargs)
-        items.extend(response.get("Items", []))
-        last_key = response.get("LastEvaluatedKey")
-        if not last_key:
-            break
-    return items
+        return not self.subreddits
 
 
 def collect_grounding_signal(
-    items: Optional[Sequence[dict]] = None,
-    *,
-    top_k: int = TOP_SUBREDDITS_K,
-    sample_k: int = SAMPLE_TITLES_K,
-    rng: Optional[random.Random] = None,
+    subreddits: Optional[Sequence[str]] = None,
 ) -> GroundingSignal:
-    """Build the grounding snapshot from raw DDB items.
+    """Build the grounding snapshot.
 
-    Pulled out as a pure function so tests can pass canned items without
-    needing DynamoDB.
+    Defaults to the curated INDEXED_SUBREDDITS list; tests can pass an
+    arbitrary list in.
     """
-    rng = rng or random.Random()
-    raw = list(items) if items is not None else _scan_reddit_posts()
-
-    subreddit_counter: Counter = Counter()
-    titles_by_subreddit: dict = {}
-    for item in raw:
-        subreddit = (item.get("subreddit") or "").strip()
-        title = (item.get("title") or "").strip()
-        if not subreddit:
-            continue
-        subreddit_counter[subreddit] += 1
-        if title:
-            titles_by_subreddit.setdefault(subreddit, []).append(title)
-
-    top = subreddit_counter.most_common(top_k)
-    top_names = {name for name, _ in top}
-
-    # Sample titles distributed across the top subreddits so the LLM sees
-    # representative breadth, not all titles from one dominant community.
-    eligible_titles: List[str] = []
-    for name in top_names:
-        eligible_titles.extend(titles_by_subreddit.get(name, []))
-    rng.shuffle(eligible_titles)
-    sample_titles = eligible_titles[:sample_k]
-
-    return GroundingSignal(subreddit_counts=top, sample_titles=sample_titles)
+    source = list(subreddits) if subreddits is not None else INDEXED_SUBREDDITS
+    cleaned = [s.strip() for s in source if s and s.strip()]
+    return GroundingSignal(subreddits=cleaned)
 
 
 def build_llm_prompt(
     signal: GroundingSignal, *, target_count: int = TARGET_PROMPT_COUNT
 ) -> str:
-    """Fill the SUGGESTED_PROMPTS_USER_PROMPT template with the grounding signal."""
+    """Fill the SUGGESTED_PROMPTS_USER_PROMPT template with the subreddit list."""
     subreddit_lines = (
-        "\n".join(
-            f"- {name} ({count} posts)" for name, count in signal.subreddit_counts
-        )
+        "\n".join(f"- r/{name}" for name in signal.subreddits)
         or "- (no community signal available)"
     )
-    title_lines = (
-        "\n".join(f'- "{t}"' for t in signal.sample_titles) or "- (no titles available)"
-    )
-
     return SUGGESTED_PROMPTS_USER_PROMPT.format(
         target_count=target_count,
         subreddit_lines=subreddit_lines,
-        title_lines=title_lines,
     )
 
 
@@ -201,17 +182,17 @@ def parse_llm_response(raw: str) -> List[str]:
 
 def regenerate_prompts(
     *,
-    rng: Optional[random.Random] = None,
-    raw_items: Optional[Sequence[dict]] = None,
+    subreddits: Optional[Sequence[str]] = None,
     llm_provider: LLMProvider = LLMProvider.DEEPSEEK,
 ) -> SuggestedPrompts:
     """Run the full grounding → LLM → parse → persist pipeline.
 
-    Raises if the regenerated set is too small to publish; callers should let
-    the cron fail loudly so SNS alarms fire — leaving the previous record in
-    place keeps the homepage populated until the next run.
+    Raises if the grounding signal is empty or the regenerated set is too
+    small to publish; callers should let the cron fail loudly so SNS alarms
+    fire — leaving the previous record in place keeps the homepage populated
+    until the next run.
     """
-    signal = collect_grounding_signal(items=raw_items, rng=rng)
+    signal = collect_grounding_signal(subreddits=subreddits)
     if signal.is_empty:
         raise RuntimeError(
             "No grounding signal available; aborting prompt regeneration"
@@ -239,14 +220,14 @@ def regenerate_prompts(
 
     record = SuggestedPrompts.new(
         prompts=prompts[:TARGET_PROMPT_COUNT],
-        sources_used=[name for name, _ in signal.subreddit_counts],
+        sources_used=signal.subreddits,
     )
     record.save()
     logger.info(
         "Persisted SuggestedPrompts",
         extra={
             "count": len(record.prompts),
-            "sources": record.sources_used,
+            "source_count": len(record.sources_used),
         },
     )
     return record
