@@ -7,7 +7,7 @@ from typing import Any, List, Optional
 
 from langsmith import Client
 
-from chalicelib.core.config import AppConfig
+from chalicelib.core.config import config
 from chalicelib.llm import LLMFactory, LLMProvider
 from chalicelib.models.data_objects import ChatMessage, EvaluationMessage
 from chalicelib.llm.metrics import RetrievalMetrics, RetrievalMetricsResult
@@ -110,7 +110,6 @@ class ScoresForComputation:
     retrieval_relevance: Optional[float] = None
 
 
-config = AppConfig()
 langsmith_client = Client(
     api_key=config.langsmith_api_key,
     api_url=config.langsmith_api_url,

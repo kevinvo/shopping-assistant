@@ -4,7 +4,7 @@ from typing import List, Generator
 from abc import ABC, abstractmethod
 from enum import Enum
 from openai import OpenAI
-from chalicelib.core.config import AppConfig
+from chalicelib.core.config import config as app_config
 from chalicelib.core.performance_timer import measure_execution_time
 from chalicelib.models.data_objects import ChatMessage, RewriteAndHyDEResult
 from chalicelib.prompts import (
@@ -24,15 +24,20 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 
+_models_rebuilt = False
+
+
 def _ensure_models_rebuilt():
-    """Ensure all LangChain models are properly rebuilt with all dependencies."""
+    """Rebuild LangChain models once per process (forward-ref workaround)."""
+    global _models_rebuilt
+    if _models_rebuilt:
+        return
     try:
-        # Try to rebuild models - this is still needed in current LangChain versions
-        # due to complex forward reference issues in the LangChain codebase
         ChatOpenAI.model_rebuild()
     except Exception as e:
         logger.warning(f"Model rebuild warning: {e}")
-        # Continue anyway - models might already be built
+    # Set the flag even on failure so we don't retry on every call.
+    _models_rebuilt = True
 
 
 @dataclass
@@ -197,13 +202,22 @@ class BaseLLM(ABC):
 
 class DeepSeekClient(BaseLLM):
     def __init__(self):
-        self.config = AppConfig()
+        # Reuse the module-level AppConfig singleton; a fresh AppConfig()
+        # here would re-fetch from Secrets Manager on every chat request
+        # (~3-5s on cold start, ~200ms warm).
+        self.config = app_config
         self.client = OpenAI(
             api_key=self.config.openrouter_api_key,
             base_url="https://openrouter.ai/api/v1",
             default_headers=self._build_headers(),
         )
         self.model = "deepseek/deepseek-chat"
+        # Cache ChatOpenAI by the kwargs that vary across calls. Building a
+        # fresh ChatOpenAI per call discards the underlying httpx pool to
+        # OpenRouter and adds ~100-200ms of TLS setup per invocation. In
+        # practice this dict ends up with ~2 entries (rewrite/JSON + final
+        # stream).
+        self._langchain_cache: Dict[tuple, ChatOpenAI] = {}
 
     def _build_headers(self) -> Dict[str, str]:
         """Build headers for OpenRouter requests, including DeepSeek API key if available."""
@@ -221,34 +235,46 @@ class DeepSeekClient(BaseLLM):
             pass
         return headers
 
+    def _get_langchain_client(
+        self,
+        *,
+        temperature: float,
+        top_p: float,
+        max_tokens: int,
+        json_mode: bool,
+    ) -> ChatOpenAI:
+        key = (temperature, top_p, max_tokens, json_mode)
+        client = self._langchain_cache.get(key)
+        if client is not None:
+            return client
+        _ensure_models_rebuilt()
+        model_kwargs: Dict[str, Any] = {}
+        if json_mode:
+            model_kwargs["response_format"] = {"type": "json_object"}
+        client = ChatOpenAI(
+            model=self.model,
+            api_key=SecretStr(self.config.openrouter_api_key),
+            base_url="https://openrouter.ai/api/v1",
+            temperature=temperature,
+            top_p=top_p,
+            max_tokens=max_tokens,  # type: ignore[arg-type]
+            model_kwargs=model_kwargs,
+            default_headers=self._build_headers(),
+        )
+        self._langchain_cache[key] = client
+        return client
+
     @measure_execution_time
     @traceable(name="deepseek_chat")
     def chat(self, messages: List[ChatMessage], **kwargs) -> str:
         try:
-            # Convert ChatMessage objects to LangChain messages for LangSmith tracking
             langchain_messages = [m.to_langchain_message() for m in messages]
-
-            # Ensure model is rebuilt before creating client
-            _ensure_models_rebuilt()
-
-            # Prepare model_kwargs for JSON mode if requested
-            model_kwargs = {}
-            if kwargs.get("json_mode", False):
-                model_kwargs["response_format"] = {"type": "json_object"}
-
-            # Use LangChain ChatOpenAI for proper LangSmith integration
-            langchain_client = ChatOpenAI(
-                model=self.model,
-                api_key=SecretStr(self.config.openrouter_api_key),
-                base_url="https://openrouter.ai/api/v1",
+            langchain_client = self._get_langchain_client(
                 temperature=kwargs.get("temperature", 0.7),
                 top_p=kwargs.get("top_p", 0.95),
-                max_tokens=kwargs.get("max_tokens", 2000),  # type: ignore[arg-type]
-                model_kwargs=model_kwargs,
-                default_headers=self._build_headers(),
+                max_tokens=kwargs.get("max_tokens", 2000),
+                json_mode=kwargs.get("json_mode", False),
             )
-
-            # Use LangChain client which will automatically track with LangSmith
             response = langchain_client.invoke(langchain_messages)
             return str(response.content) if response.content else ""
         except Exception as e:
@@ -262,23 +288,12 @@ class DeepSeekClient(BaseLLM):
     ) -> Generator[str, None, None]:
         try:
             langchain_messages = [m.to_langchain_message() for m in messages]
-            _ensure_models_rebuilt()
-
-            model_kwargs = {}
-            if kwargs.get("json_mode", False):
-                model_kwargs["response_format"] = {"type": "json_object"}
-
-            langchain_client = ChatOpenAI(
-                model=self.model,
-                api_key=SecretStr(self.config.openrouter_api_key),
-                base_url="https://openrouter.ai/api/v1",
+            langchain_client = self._get_langchain_client(
                 temperature=kwargs.get("temperature", 0.7),
                 top_p=kwargs.get("top_p", 0.95),
-                max_tokens=kwargs.get("max_tokens", 2000),  # type: ignore[arg-type]
-                model_kwargs=model_kwargs,
-                default_headers=self._build_headers(),
+                max_tokens=kwargs.get("max_tokens", 2000),
+                json_mode=kwargs.get("json_mode", False),
             )
-
             for chunk in langchain_client.stream(langchain_messages):
                 if chunk.content:
                     yield chunk.content
