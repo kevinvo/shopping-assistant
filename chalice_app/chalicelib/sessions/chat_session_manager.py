@@ -73,9 +73,24 @@ class Chat:
             except Exception as meta_error:
                 logger.warning(f"Failed to add session metadata: {meta_error}")
 
-            result = self.llm.rewrite_and_generate_hyde(
-                last_message_content=query, message_history=chat_messages
-            )
+            # Overlap the rewrite/HyDE LLM call with a raw-query search.
+            # Previously rewrite (~5s) blocked search (~2-14s); now they run
+            # concurrently, so the chain ends at max(rewrite, search) instead
+            # of rewrite + search. The rewritten query is still used for
+            # rerank scoring; we drop the separate rewrite-driven and
+            # HyDE-driven searches because their incremental recall over the
+            # raw-query search hasn't justified the extra wall time.
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                raw_search_future = executor.submit(self._perform_search, query)
+                rewrite_future = executor.submit(
+                    self.llm.rewrite_and_generate_hyde,
+                    last_message_content=query,
+                    message_history=chat_messages,
+                )
+
+                result = rewrite_future.result()
+                search_results = raw_search_future.result()
+
             rewritten_prompt = result.rewritten_query
             hype_response_query = result.hyde_response
 
@@ -83,26 +98,12 @@ class Chat:
             logger.info(f"Rewritten query: {rewritten_prompt}")
             logger.info(f"Hype Response Query: {hype_response_query}")
 
-            # Execute both searches in parallel for better performance
-            with ThreadPoolExecutor(max_workers=2) as executor:
-                future1 = executor.submit(self._perform_search, rewritten_prompt)
-                future2 = executor.submit(self._perform_search, hype_response_query)
+            search_results_from_hype: List[SearchResult] = []
+            combined_results = search_results
 
-                search_results = future1.result()
-                search_results_from_hype = future2.result()
-
-            # Combine and deduplicate search results from both queries
-            combined_results = self._combine_search_results(
-                results1=search_results, results2=search_results_from_hype
-            )
-
-            if len(search_results) == 0 and len(search_results_from_hype) == 0:
+            if not search_results:
                 logger.warning(
-                    f"Both searches returned zero results for query: {query[:50]}..."
-                )
-            elif len(combined_results) == 0:
-                logger.warning(
-                    "Combined results is zero despite individual searches returning results"
+                    f"Raw-query search returned zero results for query: {query[:50]}..."
                 )
 
             # Store pre-rerank results for retrieval metrics
