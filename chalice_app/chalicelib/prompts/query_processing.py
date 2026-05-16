@@ -71,3 +71,16 @@ Write as if summarizing key points from a Reddit discussion - focus on product t
 Be brief (2-3 sentences), informative, and consistent - for the same question, generate similar answers.
 Focus on terms and concepts that would help find relevant Reddit discussions.
 """.strip()
+
+# Appended to PROMPT_REWRITE_INSTRUCTION to force JSON-mode output.
+REWRITE_JSON_SUFFIX = '\n\nReturn JSON: {"rewritten_query": "..."}'
+
+# Appended to HYDE_GENERATION_PROMPT to (a) resolve conversation context
+# directly in the HyDE prompt now that we no longer feed it the rewritten
+# query, and (b) request a short keyword phrase instead of a paragraph -
+# shorter outputs generate faster and embed comparably for retrieval.
+HYDE_USER_INSTRUCTION_SUFFIX = (
+    "\n\nResolve any pronouns or topic ellipsis against the conversation above. "
+    "Output a concise comma-separated list of product types and key features "
+    "(~20 tokens), not a sentence."
+)
