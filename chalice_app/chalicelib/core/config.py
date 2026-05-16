@@ -92,15 +92,22 @@ class AppConfig:
         secret_name = f"{self.env.value}/shopping-assistant/app"
         logger.info(f"Loading credentials from Secrets Manager for {secret_name}")
 
-        try:
-            session = boto3.session.Session()
-            client = session.client(service_name="secretsmanager")
-            secret_value = client.get_secret_value(SecretId=secret_name)
-            credentials = json.loads(secret_value["SecretString"])
-            return credentials
-        except Exception as e:
-            logger.error(f"Error loading credentials from Secrets Manager: {e}")
-            return {}
+        # Fail loudly at module load instead of returning {} and letting the
+        # first request die later with a misleading "X API key not found in
+        # credentials" ValueError. All three env-scoped secrets
+        # ({prod,dev,chalice-test}/shopping-assistant/app) exist in the
+        # account, so this path should only fail on a real outage / IAM
+        # regression -- which is exactly when we want a fast, obvious crash.
+        session = boto3.session.Session()
+        client = session.client(service_name="secretsmanager")
+        secret_value = client.get_secret_value(SecretId=secret_name)
+        credentials = json.loads(secret_value["SecretString"])
+        if not isinstance(credentials, dict):
+            raise TypeError(
+                f"Secret {secret_name} did not parse to a JSON object "
+                f"(got {type(credentials).__name__})"
+            )
+        return credentials
 
     def _require_credential(self, key: str) -> str:
         value = self._credentials.get(key)
