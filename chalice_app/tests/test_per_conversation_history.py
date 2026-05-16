@@ -223,8 +223,8 @@ def test_process_message_loads_and_saves_conversation_history(monkeypatch):
         ChatMessage(role="assistant", content="response"),
     ]
 
-    with patch.object(chat_message_service, "Chat") as MockChat:
-        MockChat.return_value.process_chat.side_effect = _patch_chat_to_return(
+    with patch.object(chat_message_service, "get_chat") as mock_get_chat:
+        mock_get_chat.return_value.process_chat.side_effect = _patch_chat_to_return(
             updated_history
         )
         chat_message_service.process_message(_build_payload())
@@ -274,8 +274,8 @@ def test_process_message_falls_back_to_connection_session_id(monkeypatch):
         chat_message_service, "trigger_async_evaluation", lambda *a, **k: None
     )
 
-    with patch.object(chat_message_service, "Chat") as MockChat:
-        MockChat.return_value.process_chat.side_effect = _patch_chat_to_return([])
+    with patch.object(chat_message_service, "get_chat") as mock_get_chat:
+        mock_get_chat.return_value.process_chat.side_effect = _patch_chat_to_return([])
         chat_message_service.process_message(
             _build_payload(session_id="", conversation_id="conv-1")
         )

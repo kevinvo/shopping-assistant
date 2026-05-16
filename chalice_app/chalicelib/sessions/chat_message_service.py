@@ -5,7 +5,8 @@ import os
 import boto3
 import logging
 from botocore.exceptions import ClientError
-from typing import Dict, Any, Union, Optional
+from functools import lru_cache
+from typing import Dict, Any, Union, Optional, Callable
 
 from chalicelib.sessions.chat_session_manager import Chat
 from chalicelib.models.data_objects import (
@@ -22,6 +23,33 @@ logger.setLevel(logging.INFO)
 
 sqs_client = boto3.client("sqs")
 EVALUATION_QUEUE_URL = os.environ.get("EVALUATION_QUEUE_URL")
+
+
+# Module-level lazy singleton. Building Chat() per request rebuilds the
+# QdrantIndexer (Qdrant client, OpenAIEmbeddings, S3 client), DeepSeekClient,
+# and BM25Reranker -- discarding all their HTTP/TLS pools and the in-memory
+# BM25 vocab cache. Reusing one instance across warm invocations is the
+# single biggest fix for warm TTFT after the streaming buffer.
+_chat_instance: Optional[Chat] = None
+
+
+def get_chat() -> Chat:
+    global _chat_instance
+    if _chat_instance is None:
+        _chat_instance = Chat()
+    return _chat_instance
+
+
+@lru_cache(maxsize=8)
+def _apigw_client_for(domain_name: str, stage: str):
+    # endpoint_url depends on (domain_name, stage), so we can't use a single
+    # module-level client. lru_cache amortizes the ~10-30ms boto3 client
+    # construction across the ~25 sends per streamed response.
+    return boto3.client(
+        "apigatewaymanagementapi",
+        endpoint_url=f"https://{domain_name}/{stage}",
+    )
+
 
 # Buffer LLM-streamed tokens until this many characters accumulate, then flush
 # in one APIGW post_to_connection. Targets ~20-30 websocket sends per response
@@ -67,9 +95,7 @@ def send_message(
         message_dict = message
         logger.info(f"Message content (Dict): {message_dict}")
 
-    gateway_api = boto3.client(
-        "apigatewaymanagementapi", endpoint_url=f"https://{domain_name}/{stage}"
-    )
+    gateway_api = _apigw_client_for(domain_name, stage)
 
     try:
         gateway_api.post_to_connection(
@@ -264,6 +290,34 @@ def process_message(message_payload: MessagePayload) -> None:
         first_flush_done = [False]
         chunk_buffer: list[str] = []
 
+        def safe_invoke(
+            op: Callable[[], None], *, context: str, flip_on_error: bool = True
+        ) -> bool:
+            """Run a websocket-bound op, swallowing send failures.
+
+            Returns True on success. On any failure (Gone or otherwise) the
+            error is logged and connection_valid is flipped so subsequent
+            token callbacks short-circuit instead of looping into the same
+            error.
+            """
+            try:
+                op()
+                return True
+            except ClientError as e:
+                code = e.response.get("Error", {}).get("Code")
+                if code == GONE_EXCEPTION:
+                    logger.warning(
+                        f"Connection {connection_id} gone during {context} "
+                        f"for request {request_id}"
+                    )
+                else:
+                    logger.error(f"Error during {context}: {str(e)}", exc_info=True)
+            except Exception as e:
+                logger.error(f"Error during {context}: {str(e)}", exc_info=True)
+            if flip_on_error:
+                connection_valid[0] = False
+            return False
+
         def flush_chunk_buffer() -> None:
             if not chunk_buffer:
                 return
@@ -291,48 +345,34 @@ def process_message(message_payload: MessagePayload) -> None:
                 accumulated_response.append(chunk)
                 return
 
-            try:
-                if not start_sent[0]:
-                    start_response = ResponsePayload.create_message_start(
-                        request_id=request_id,
-                        messageId=messageId,
-                        conversationId=conversation_id,
-                    )
-                    send_message(
+            if not start_sent[0]:
+                ok = safe_invoke(
+                    lambda: send_message(
                         connection_id=connection_id,
                         domain_name=domain_name,
                         stage=stage,
-                        message=start_response,
-                    )
-                    start_sent[0] = True
-
-                chunk_buffer.append(chunk)
-                # Flush the very first chunk eagerly so the user sees text
-                # immediately; coalesce subsequent chunks up to the threshold.
-                if (
-                    not first_flush_done[0]
-                    or sum(map(len, chunk_buffer)) >= STREAM_CHUNK_FLUSH_CHARS
-                ):
-                    flush_chunk_buffer()
-            except ClientError as e:
-                if e.response.get("Error", {}).get("Code") == GONE_EXCEPTION:
-                    logger.warning(
-                        f"Connection {connection_id} disconnected during streaming chunk send, "
-                        f"stopping chunk delivery for request {request_id}"
-                    )
-                    connection_valid[0] = False
-                else:
-                    logger.error(
-                        f"Error sending streaming chunk: {str(e)}",
-                        exc_info=True,
-                    )
-            except Exception as chunk_error:
-                logger.error(
-                    f"Error sending streaming chunk: {str(chunk_error)}",
-                    exc_info=True,
+                        message=ResponsePayload.create_message_start(
+                            request_id=request_id,
+                            messageId=messageId,
+                            conversationId=conversation_id,
+                        ),
+                    ),
+                    context="streaming start",
                 )
+                if not ok:
+                    return
+                start_sent[0] = True
 
-        response_message, updated_chat_history, eval_metadata = Chat().process_chat(
+            chunk_buffer.append(chunk)
+            # Flush the very first chunk eagerly so the user sees text
+            # immediately; coalesce subsequent chunks up to the threshold.
+            if (
+                not first_flush_done[0]
+                or sum(map(len, chunk_buffer)) >= STREAM_CHUNK_FLUSH_CHARS
+            ):
+                safe_invoke(flush_chunk_buffer, context="streaming chunk")
+
+        response_message, updated_chat_history, eval_metadata = get_chat().process_chat(
             query=user_message,
             session_id=session_id,
             chat_history=[hist.to_dict() for hist in history.messages],
@@ -342,25 +382,7 @@ def process_message(message_payload: MessagePayload) -> None:
         )
 
         if connection_valid[0] and chunk_buffer:
-            try:
-                flush_chunk_buffer()
-            except ClientError as e:
-                if e.response.get("Error", {}).get("Code") == GONE_EXCEPTION:
-                    logger.warning(
-                        f"Connection {connection_id} disconnected during final flush "
-                        f"for request {request_id}"
-                    )
-                    connection_valid[0] = False
-                else:
-                    logger.error(
-                        f"Error flushing final streaming chunk: {str(e)}",
-                        exc_info=True,
-                    )
-            except Exception as flush_error:
-                logger.error(
-                    f"Error flushing final streaming chunk: {str(flush_error)}",
-                    exc_info=True,
-                )
+            safe_invoke(flush_chunk_buffer, context="streaming final flush")
 
         if accumulated_response:
             full_response = "".join(accumulated_response)
@@ -376,34 +398,23 @@ def process_message(message_payload: MessagePayload) -> None:
                 f"skipping completion message for request {request_id}"
             )
         elif start_sent[0]:
-            try:
-                end_response = ResponsePayload.create_message_end(
-                    request_id=request_id,
-                    messageId=messageId,
-                    conversationId=conversation_id,
-                )
-                send_message(
+            # flip_on_error=False: we're past streaming, the flag is no
+            # longer consulted, and we don't want a transient error here
+            # to look like a disconnect in the post-flow logs.
+            safe_invoke(
+                lambda: send_message(
                     connection_id=connection_id,
                     domain_name=domain_name,
                     stage=stage,
-                    message=end_response,
-                )
-            except ClientError as e:
-                if e.response.get("Error", {}).get("Code") == GONE_EXCEPTION:
-                    logger.warning(
-                        f"Connection {connection_id} disconnected while sending completion "
-                        f"for request {request_id}"
-                    )
-                else:
-                    logger.error(
-                        f"Error sending streaming complete: {str(e)}",
-                        exc_info=True,
-                    )
-            except Exception as complete_error:
-                logger.error(
-                    f"Error sending streaming complete: {str(complete_error)}",
-                    exc_info=True,
-                )
+                    message=ResponsePayload.create_message_end(
+                        request_id=request_id,
+                        messageId=messageId,
+                        conversationId=conversation_id,
+                    ),
+                ),
+                context="streaming complete",
+                flip_on_error=False,
+            )
 
         logger.info(
             "Generated chat response",
