@@ -245,7 +245,11 @@ class DeepSeekClient(BaseLLM):
         # marginal user-perceived benefit (the user is already reading by
         # the time the slow tokens arrive).
         self.model = "deepseek/deepseek-chat:nitro"
-        self.stream_model = "deepseek/deepseek-chat"
+        # User preference: prioritize speed over the ~2-3x token-cost premium
+        # nitro routing imposes. Compresses the TTFT long tail we saw at p95
+        # (~11s outlier in the 20-query probe) by routing the answer stream
+        # to whichever upstream DeepSeek provider is fastest that minute.
+        self.stream_model = "deepseek/deepseek-chat:nitro"
         # Short structured rewrite: a small, fast OpenAI model is roughly
         # 2-3x faster TTFT than DeepSeek for this output shape, supports
         # JSON mode reliably, and costs pennies per month at our volume.
