@@ -118,6 +118,12 @@ class LLMProvider(Enum):
 
 
 class BaseLLM(ABC):
+    # Subclasses may override these to route specific short LLM calls to
+    # cheaper/faster models without affecting the main answer stream. Both
+    # default to None, which means "use whatever the default model is".
+    rewrite_model: Optional[str] = None
+    hyde_model: Optional[str] = None
+
     @abstractmethod
     def chat(self, messages: List[ChatMessage], **kwargs) -> str:
         pass
@@ -178,6 +184,7 @@ class BaseLLM(ABC):
             temperature=0.2,
             max_tokens=120,
             json_mode=True,
+            model=self.rewrite_model,
         )
         return json.loads(response).get("rewritten_query") or last_message_content
 
@@ -239,6 +246,12 @@ class DeepSeekClient(BaseLLM):
         # the time the slow tokens arrive).
         self.model = "deepseek/deepseek-chat:nitro"
         self.stream_model = "deepseek/deepseek-chat"
+        # Short structured rewrite: a small, fast OpenAI model is roughly
+        # 2-3x faster TTFT than DeepSeek for this output shape, supports
+        # JSON mode reliably, and costs pennies per month at our volume.
+        # Keeps typo correction / query normalization that the user's
+        # spell-check pushback flagged we'd lose if we skipped rewrite.
+        self.rewrite_model = "openai/gpt-4o-mini"
         # Cache ChatOpenAI by the kwargs that vary across calls. Building a
         # fresh ChatOpenAI per call discards the underlying httpx pool to
         # OpenRouter and adds ~100-200ms of TLS setup per invocation. In
@@ -298,7 +311,7 @@ class DeepSeekClient(BaseLLM):
         try:
             langchain_messages = [m.to_langchain_message() for m in messages]
             langchain_client = self._get_langchain_client(
-                model=self.model,
+                model=kwargs.get("model") or self.model,
                 temperature=kwargs.get("temperature", 0.7),
                 top_p=kwargs.get("top_p", 0.95),
                 max_tokens=kwargs.get("max_tokens", 2000),
