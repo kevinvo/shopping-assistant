@@ -5,6 +5,7 @@ import os
 import boto3
 import logging
 from botocore.exceptions import ClientError
+from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from typing import Dict, Any, Union, Optional, Callable
 
@@ -92,6 +93,45 @@ STREAM_CHUNK_FLUSH_CHARS = 128
 # API Gateway raises ClientError with this code when the websocket peer has
 # disconnected. Promoted to a constant so the three handlers stay in sync.
 GONE_EXCEPTION = "GoneException"
+
+
+# Single-worker daemon pool so PROCESSING status frames are dispatched in
+# the order they were submitted (3 emits per turn) without blocking the
+# chat pipeline. send_message hits APIGW post_to_connection synchronously
+# (~20-80ms); doing that on the critical path between rerank and the next
+# LLM step would defeat the purpose of the status events.
+_STATUS_EMIT_POOL = ThreadPoolExecutor(max_workers=1, thread_name_prefix="status-emit")
+
+
+def send_status_async(
+    *,
+    connection_id: str,
+    domain_name: str,
+    stage: str,
+    status_text: str,
+    request_id: str,
+    message_id: str,
+    conversation_id: Optional[str],
+) -> None:
+    """Fire-and-forget PROCESSING frame. Returns immediately."""
+
+    def _emit() -> None:
+        try:
+            send_message(
+                connection_id=connection_id,
+                domain_name=domain_name,
+                stage=stage,
+                message=ResponsePayload.create_processing(
+                    request_id=request_id,
+                    content=status_text,
+                    messageId=message_id,
+                    conversationId=conversation_id,
+                ),
+            )
+        except Exception as e:
+            logger.warning(f"send_status_async dropped frame for {message_id}: {e}")
+
+    _STATUS_EMIT_POOL.submit(_emit)
 
 
 @measure_execution_time
@@ -374,6 +414,19 @@ def process_message(message_payload: MessagePayload) -> None:
                 message=chunk_response,
             )
 
+        def status_callback(status_text: str) -> None:
+            if not connection_valid[0]:
+                return
+            send_status_async(
+                connection_id=connection_id,
+                domain_name=domain_name,
+                stage=stage,
+                status_text=status_text,
+                request_id=request_id,
+                message_id=messageId,
+                conversation_id=conversation_id,
+            )
+
         def streaming_callback(chunk: str) -> None:
             if not connection_valid[0]:
                 # Capture for full-response logging even though the client is
@@ -417,6 +470,7 @@ def process_message(message_payload: MessagePayload) -> None:
             socket_id=connection_id,
             request_id=request_id,
             streaming_callback=streaming_callback,
+            status_callback=status_callback,
         )
 
         if connection_valid[0] and chunk_buffer:
