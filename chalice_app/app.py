@@ -158,7 +158,11 @@ def chat_processor(event):
     """Process chat messages from SQS queue."""
     try:
         # event is an SQSEvent object - iterate directly
-        from chalicelib.sessions.chat_message_service import process_message
+        from chalicelib.sessions.chat_message_service import (
+            process_message,
+            is_keep_warm_record,
+            prime_singletons,
+        )
         from chalicelib.models.data_objects import MessagePayload
 
         record_count = 0
@@ -175,8 +179,12 @@ def chat_processor(event):
                         "attributes": getattr(record, "attributes", {}),
                     },
                 )
-                # record.body is already a string, not JSON
-                message_payload = MessagePayload.from_dict(json.loads(record.body))
+                body = json.loads(record.body)
+                if is_keep_warm_record(body):
+                    prime_singletons()
+                    logger.info("Keep-warm ping handled; singletons primed")
+                    continue
+                message_payload = MessagePayload.from_dict(body)
                 process_message(message_payload)
                 logger.info("Successfully processed chat message")
             except Exception as e:
@@ -392,6 +400,37 @@ def keep_websocket_warm(event):
 
     except Exception as e:
         logger.warning(f"WebSocket keep-warm ping error: {e}")
+
+
+@app.schedule(Rate(3, unit=Rate.MINUTES))
+@notify_on_exception
+def keep_chat_warm(event):
+    """Enqueue a sentinel SQS message every 3 min so chat_processor stays warm.
+
+    AWS recycles Lambda containers after ~10-15 min idle. Cold-start cost
+    for chat_processor is ~20s (LangChain imports, Secrets Manager fetch,
+    Qdrant/OpenAI/S3 client init, BM25 vocab load). At 3-min cadence the
+    container stays warm for real user queries and TTFT drops from ~50s
+    cold to ~5-7s warm.
+
+    chat_processor recognizes the sentinel body and short-circuits to
+    prime_singletons() instead of going through process_message.
+
+    Function name kept short to fit EventBridge's 64-char rule-name limit.
+    """
+    queue_url = os.environ.get("CHAT_PROCESSING_QUEUE_URL")
+    if not queue_url:
+        logger.warning("CHAT_PROCESSING_QUEUE_URL not set, skipping chat keep-warm")
+        return
+    try:
+        sqs_client = boto3.client("sqs")
+        sqs_client.send_message(
+            QueueUrl=queue_url,
+            MessageBody=json.dumps({"keep_warm": True}),
+        )
+        logger.info("Chat processor keep-warm ping enqueued")
+    except Exception as e:
+        logger.warning(f"Chat keep-warm ping error: {e}")
 
 
 @app.schedule(Rate(2, unit=Rate.DAYS))

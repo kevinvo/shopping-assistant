@@ -40,6 +40,35 @@ def get_chat() -> Chat:
     return _chat_instance
 
 
+# Sentinel body that the scheduled keep-warm Lambda enqueues onto the chat
+# queue. The chat_processor handler short-circuits before MessagePayload
+# parsing when it sees this body, calling prime_singletons() to make the
+# next real user request hit a fully warm container.
+KEEP_WARM_BODY = {"keep_warm": True}
+
+
+def is_keep_warm_record(body: Dict[str, Any]) -> bool:
+    return isinstance(body, dict) and body.get("keep_warm") is True
+
+
+def prime_singletons() -> None:
+    """Force-initialize the Chat singleton and warm its hot-path caches.
+
+    Called by keep-warm pings so a subsequent real user query skips the
+    one-time per-cold-start work (Chat constructor, vocab S3 fetch, DeepSeek
+    TLS pool, OpenAI embeddings TLS pool, LangChain model rebuild).
+    """
+    chat = get_chat()
+    # Loads the BM25 vocabulary from the S3 cache (or rebuilds from Qdrant
+    # if cache miss) so the first real hybrid_search skips that path.
+    chat.indexer._generate_query_sparse_vector("warmup")
+    # Embeddings TLS handshake is the other multi-second cost on first call.
+    try:
+        chat.indexer.embeddings.embed_query("warmup")
+    except Exception as e:
+        logger.warning(f"Keep-warm embed failed (continuing): {e}")
+
+
 @lru_cache(maxsize=8)
 def _apigw_client_for(domain_name: str, stage: str):
     # endpoint_url depends on (domain_name, stage), so we can't use a single
