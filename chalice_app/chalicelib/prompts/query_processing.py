@@ -4,83 +4,114 @@ Query processing prompts for context-aware rewriting and HyDE generation.
 These prompts are used to:
 1. Rewrite user queries with conversation context awareness
 2. Generate hypothetical document embeddings (HyDE) for improved search
+
+Both prompts share the same CONTINUATION vs TOPIC SHIFT decision so they
+react identically to a topic change. Without parallel handling, the
+rewrite can correctly drop prior context while HyDE still embeds it —
+poisoning ~1/3 of the search pool with off-topic results.
 """
 
 CONTEXT_AWARE_PROMPT_REWRITING = """
-Analyze the conversation history and rewrite the most recent user prompt/query, with these guidelines:
+You rewrite the user's latest message into a self-contained search query for a Reddit-style corpus.
 
-1. Identify if the latest query represents a topic change or new conversation direction.
-   - If it contains new keywords, entities, or question types not present in recent exchanges, treat it as a topic change
-   - Look for explicit signals like "let's talk about something else" or completely unrelated questions
-   - Even questions that relate to previous topics but focus on a new aspect should be treated as topic shifts
-   - IMPORTANT: If the query contains specific product names, ingredients, or concepts not mentioned in recent exchanges, treat it as a new topic
+Decide one of two cases:
 
-2. For topic changes:
-   - Treat the query as a fresh conversation starting point - DO NOT carry over previous context as the main focus
-   - Expand the query to be fully self-contained without relying on previous topics
-   - If the query uses ambiguous references (like "it", "this", "that") but appears to be a new topic, interpret these references as part of the new topic only
-   - Signal the topic change by starting the rewritten query with clear, specific language about the new subject
-   - Prior topics should only be mentioned if directly relevant to understanding the new question
-   - NEVER introduce information about previous topics unless explicitly requested
+CONTINUATION — the latest message clearly follows the most recent exchange. It uses a pronoun ("it", "this", "that"), topic ellipsis ("what about X?"), or qualifies the previous question.
+  → Rewrite by expanding pronouns and ellipsis from the recent exchange.
 
-3. For continued conversations:
-   - Ensure the rewritten query is coherent, precise, and contextually relevant
-   - Expand pronouns and unclear references based on the conversation history
-   - Maintain the user's original intent while adding clarity
-   - Focus on the most recent topics and questions rather than summarizing the entire conversation
-   - Prioritize the specific question being asked over general context from earlier exchanges
+TOPIC SHIFT — the latest message introduces a new product, entity, or concept that does not follow from the most recent exchange.
+  → Rewrite using ONLY the new message. Do NOT carry over any prior topic.
 
-4. In all cases:
-   - Preserve the user's core question or request as the primary focus
-   - Do not introduce information not implied or requested by the user
-   - Focus on making the query self-contained and clear
-   - When a user asks a direct follow-up question, prioritize that specific question rather than recapping earlier conversation
-   - Avoid unnecessary summarization of previous exchanges unless explicitly requested
-   - IMPORTANT: When a user introduces a new item or topic (like "What do you think about X?"), make that new topic the primary focus
-   - NEVER rewrite a query to focus on a previous topic when the user is clearly asking about something new
+When in doubt, choose TOPIC SHIFT. Wrong context biases the search; missing context is recoverable on the next turn.
 
-The goal is to detect topic shifts decisively and prevent previous conversation context from contaminating new topics while maintaining coherence for continued conversations.
+# Examples
+
+History:
+  user: gift ideas for my girlfriend's birthday
+  assistant: here are some gift ideas...
+User: what about cards?
+Rewritten: birthday card ideas for a girlfriend
+(CONTINUATION — "cards" is topic ellipsis on a birthday-gift thread)
+
+History:
+  user: gift ideas for my girlfriend's birthday
+  assistant: here are some gift ideas...
+User: tell me about backpacks
+Rewritten: tell me about backpacks
+(TOPIC SHIFT — "backpacks" is a new product not previously discussed)
+
+History:
+  user: best running shoes for flat feet
+  assistant: here are some recommendations...
+User: what about for trail running?
+Rewritten: best running shoes for flat feet for trail running
+(CONTINUATION — "for trail running" qualifies the running-shoes query)
+
+History:
+  user: how to clean a cast iron pan
+  assistant: here's how to clean it...
+User: i need a new laptop for college
+Rewritten: laptop for college
+(TOPIC SHIFT — laptops are unrelated to cast iron pans)
 """.strip()
 
 PROMPT_REWRITE_INSTRUCTION = """
-Please rewrite this prompt to be more context-aware. If this prompt introduces a new topic or question,
-make sure your rewritten version focuses primarily on this new topic rather than previous conversation topics.
-IMPORTANT: If this query contains specific product names, ingredients, or concepts not mentioned in recent exchanges,
-treat it as a new topic and focus exclusively on that. Return ONLY the rewritten prompt with no explanations or additional text: {query}
-""".strip()
-
-HYDE_GENERATION_PROMPT = """
-Given this shopping question, write a brief, consistent hypothetical answer that focuses on key product recommendations and main points.
-
-IMPORTANT: Be consistent and deterministic. For the same question, generate similar answers focusing on:
-1. The most relevant product categories/types mentioned in the question
-2. Key features or attributes that would be important for this type of product
-3. Practical considerations or use cases
-
-Keep it concise (2-3 sentences max). Focus on what would be most relevant for searching Reddit discussions.
-
-Question: {query}
-
-Hypothetical Answer:
-""".strip()
-
-HYDE_SYSTEM_PROMPT = """
-You are a shopping assistant generating hypothetical answers for search purposes.
-Generate concise, consistent, and deterministic hypothetical answers to shopping questions.
-Write as if summarizing key points from a Reddit discussion - focus on product types, key features, and practical advice.
-Be brief (2-3 sentences), informative, and consistent - for the same question, generate similar answers.
-Focus on terms and concepts that would help find relevant Reddit discussions.
+Apply the rule above to this user message: {query}
 """.strip()
 
 # Appended to PROMPT_REWRITE_INSTRUCTION to force JSON-mode output.
 REWRITE_JSON_SUFFIX = '\n\nReturn JSON: {"rewritten_query": "..."}'
 
-# Appended to HYDE_GENERATION_PROMPT to (a) resolve conversation context
-# directly in the HyDE prompt now that we no longer feed it the rewritten
-# query, and (b) request a short keyword phrase instead of a paragraph -
-# shorter outputs generate faster and embed comparably for retrieval.
-HYDE_USER_INSTRUCTION_SUFFIX = (
-    "\n\nResolve any pronouns or topic ellipsis against the conversation above. "
-    "Output a concise comma-separated list of product types and key features "
-    "(~20 tokens), not a sentence."
-)
+
+HYDE_SYSTEM_PROMPT = """
+You generate a short keyword phrase summarizing the kind of Reddit discussion that would answer the user's latest message. The phrase will be embedded and used for vector search.
+
+Decide one of two cases:
+
+CONTINUATION — the latest message clearly follows the most recent exchange (pronoun, topic ellipsis, qualifies the prior question).
+  → Generate keywords for the latest message in the context of that exchange.
+
+TOPIC SHIFT — the latest message introduces a new product, entity, or concept that does not follow from the most recent exchange.
+  → Generate keywords for ONLY the latest message. Do NOT carry over any prior topic.
+
+When in doubt, choose TOPIC SHIFT.
+
+# Examples
+
+History:
+  user: gift ideas for my girlfriend's birthday
+  assistant: here are some gift ideas...
+User: what about cards?
+Keywords: birthday card designs, handmade pop-up cards, sentimental messages, scratch-off cards, personalized cardstock
+
+History:
+  user: gift ideas for my girlfriend's birthday
+  assistant: here are some gift ideas...
+User: tell me about backpacks
+Keywords: backpack types, daypack vs commuter, water-resistant material, laptop sleeve, ergonomic straps, multiple compartments, durable construction
+
+History:
+  user: best running shoes for flat feet
+  assistant: here are some recommendations...
+User: what about for trail running?
+Keywords: trail running shoes for flat feet, arch support, rugged outsole, lug pattern, waterproof options, motion control
+
+History:
+  user: how to clean a cast iron pan
+  assistant: here's how to clean it...
+User: i need a new laptop for college
+Keywords: college laptop, lightweight, long battery life, programming-friendly, MacBook Air vs ThinkPad, RAM and storage trade-offs
+
+Output: a comma-separated list, ~20 tokens. No sentences. No prefixes.
+""".strip()
+
+HYDE_GENERATION_PROMPT = """
+Generate the keyword phrase for this user message: {query}
+
+Output the comma-separated list directly. No prefix, no sentences, no
+markdown — just the keywords.
+""".strip()
+
+# Empty by design: format spec is now folded into HYDE_GENERATION_PROMPT.
+# Kept so client.py imports stay stable.
+HYDE_USER_INSTRUCTION_SUFFIX = ""

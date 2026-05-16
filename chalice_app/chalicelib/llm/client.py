@@ -28,6 +28,15 @@ logger.setLevel(logging.INFO)
 
 _models_rebuilt = False
 
+# Tail of conversation history fed into rewrite/HyDE. Past this window the
+# established topic dominates the few-shot examples and small-model
+# topic-shift detection regresses (gpt-4o-mini "playing it safe" by
+# inheriting prior context). 4 messages = 2 prior exchanges — enough for
+# pronoun and topic-ellipsis resolution, short enough that drift from
+# older turns can't outweigh the new query.
+_REWRITE_HISTORY_TAIL = 4
+_HYDE_HISTORY_TAIL = 4
+
 
 def _ensure_models_rebuilt():
     """Rebuild LangChain models once per process (forward-ref workaround)."""
@@ -167,13 +176,8 @@ class BaseLLM(ABC):
         mode so we can keep max_tokens tight.
         """
         messages = self._build_chat_messages(
-            message_history,
-            system_prompt=(
-                CONTEXT_AWARE_PROMPT_REWRITING
-                + "\n\nFocus only on the most recent and relevant context. "
-                + "If the user is asking about a new topic, completely "
-                + "ignore previous topics."
-            ),
+            message_history[-_REWRITE_HISTORY_TAIL:],
+            system_prompt=CONTEXT_AWARE_PROMPT_REWRITING,
             user_prompt=(
                 PROMPT_REWRITE_INSTRUCTION.format(query=last_message_content)
                 + REWRITE_JSON_SUFFIX
@@ -207,7 +211,7 @@ class BaseLLM(ABC):
         results we'd just dedupe away in _combine_search_results.
         """
         messages = self._build_chat_messages(
-            message_history,
+            message_history[-_HYDE_HISTORY_TAIL:],
             system_prompt=HYDE_SYSTEM_PROMPT,
             user_prompt=(
                 HYDE_GENERATION_PROMPT.format(query=last_message_content)
