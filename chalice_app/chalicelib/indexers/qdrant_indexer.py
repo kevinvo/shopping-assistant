@@ -9,7 +9,7 @@ from chalicelib.core.logger_config import setup_logger
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
 import uuid
-from chalicelib.core.performance_timer import measure_execution_time
+from chalicelib.core.performance_timer import measure_execution_time, timed_block
 from pydantic import SecretStr
 import math
 import re
@@ -577,89 +577,92 @@ class QdrantIndexer:
             List of SearchResult objects with RRF-fused scores
         """
 
-        query_embedding = self.embeddings.embed_query(query)
-        query_sparse_vector = self._generate_query_sparse_vector(query)
+        with timed_block("hybrid_search.embed_query"):
+            query_embedding = self.embeddings.embed_query(query)
+        with timed_block("hybrid_search.sparse_vector"):
+            query_sparse_vector = self._generate_query_sparse_vector(query)
 
         # Fetch more candidates for better fusion
         fetch_limit = limit * 3
 
         try:
-            # Dense search
-            dense_response = self.client.query_points(
-                collection_name=self.collection_name,
-                query=query_embedding,
-                query_filter=None,
-                limit=fetch_limit,
-                with_payload=True,
-                with_vectors=False,
-                score_threshold=0.0,
-                using="dense",
-            )
-            dense_results = dense_response.points
+            with timed_block("hybrid_search.qdrant_dense"):
+                dense_response = self.client.query_points(
+                    collection_name=self.collection_name,
+                    query=query_embedding,
+                    query_filter=None,
+                    limit=fetch_limit,
+                    with_payload=True,
+                    with_vectors=False,
+                    score_threshold=0.0,
+                    using="dense",
+                )
+                dense_results = dense_response.points
 
-            # Sparse search
-            sparse_response = self.client.query_points(
-                collection_name=self.collection_name,
-                query=query_sparse_vector,
-                query_filter=None,
-                limit=fetch_limit,
-                with_payload=True,
-                with_vectors=False,
-                using="sparse",
-            )
-            sparse_results = sparse_response.points
+            with timed_block("hybrid_search.qdrant_sparse"):
+                sparse_response = self.client.query_points(
+                    collection_name=self.collection_name,
+                    query=query_sparse_vector,
+                    query_filter=None,
+                    limit=fetch_limit,
+                    with_payload=True,
+                    with_vectors=False,
+                    using="sparse",
+                )
+                sparse_results = sparse_response.points
 
-            # Build RRF scores using document ID as key
-            # RRF formula: score = 1 / (k + rank)
-            rrf_scores: Dict[str, Dict[str, Any]] = {}
+            with timed_block("hybrid_search.rrf_fusion"):
+                # Build RRF scores using document ID as key
+                # RRF formula: score = 1 / (k + rank)
+                rrf_scores: Dict[str, Dict[str, Any]] = {}
 
-            # Process dense results
-            for rank, hit in enumerate(dense_results, start=1):
-                if not hit.payload or not hit.payload.get("text"):
-                    continue
-                doc_id = str(hit.id)
-                rrf_dense = 1.0 / (rrf_k + rank)
-                rrf_scores[doc_id] = {
-                    "payload": hit.payload,
-                    "rrf_dense": rrf_dense,
-                    "rrf_sparse": 0.0,
-                }
-
-            # Process sparse results
-            for rank, hit in enumerate(sparse_results, start=1):
-                if not hit.payload or not hit.payload.get("text"):
-                    continue
-                doc_id = str(hit.id)
-                rrf_sparse = 1.0 / (rrf_k + rank)
-                if doc_id in rrf_scores:
-                    rrf_scores[doc_id]["rrf_sparse"] = rrf_sparse
-                else:
+                # Process dense results
+                for rank, hit in enumerate(dense_results, start=1):
+                    if not hit.payload or not hit.payload.get("text"):
+                        continue
+                    doc_id = str(hit.id)
+                    rrf_dense = 1.0 / (rrf_k + rank)
                     rrf_scores[doc_id] = {
                         "payload": hit.payload,
-                        "rrf_dense": 0.0,
-                        "rrf_sparse": rrf_sparse,
+                        "rrf_dense": rrf_dense,
+                        "rrf_sparse": 0.0,
                     }
 
-            # Compute final weighted RRF score
-            # final_score = alpha * rrf_dense + (1 - alpha) * rrf_sparse
-            results = []
-            for doc_id, data in rrf_scores.items():
-                final_score = (
-                    alpha * data["rrf_dense"] + (1 - alpha) * data["rrf_sparse"]
-                )
-                results.append(
-                    {
-                        "doc_id": doc_id,
-                        "payload": data["payload"],
-                        "score": final_score,
-                        "rrf_dense": data["rrf_dense"],
-                        "rrf_sparse": data["rrf_sparse"],
-                    }
-                )
+                # Process sparse results
+                for rank, hit in enumerate(sparse_results, start=1):
+                    if not hit.payload or not hit.payload.get("text"):
+                        continue
+                    doc_id = str(hit.id)
+                    rrf_sparse = 1.0 / (rrf_k + rank)
+                    if doc_id in rrf_scores:
+                        rrf_scores[doc_id]["rrf_sparse"] = rrf_sparse
+                    else:
+                        rrf_scores[doc_id] = {
+                            "payload": hit.payload,
+                            "rrf_dense": 0.0,
+                            "rrf_sparse": rrf_sparse,
+                        }
 
-            # Sort by final RRF score
-            results.sort(key=lambda x: x["score"], reverse=True)
-            top_results = results[:limit]
+                # Compute final weighted RRF score
+                # final_score = alpha * rrf_dense + (1 - alpha) * rrf_sparse
+                results = []
+                for doc_id, data in rrf_scores.items():
+                    final_score = (
+                        alpha * data["rrf_dense"] + (1 - alpha) * data["rrf_sparse"]
+                    )
+                    results.append(
+                        {
+                            "doc_id": doc_id,
+                            "payload": data["payload"],
+                            "score": final_score,
+                            "rrf_dense": data["rrf_dense"],
+                            "rrf_sparse": data["rrf_sparse"],
+                        }
+                    )
+
+                # Sort by final RRF score
+                results.sort(key=lambda x: x["score"], reverse=True)
+                top_results = results[:limit]
 
             return [
                 SearchResult(

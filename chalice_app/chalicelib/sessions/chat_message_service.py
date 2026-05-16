@@ -23,6 +23,11 @@ logger.setLevel(logging.INFO)
 sqs_client = boto3.client("sqs")
 EVALUATION_QUEUE_URL = os.environ.get("EVALUATION_QUEUE_URL")
 
+# Buffer LLM-streamed tokens until this many characters accumulate, then flush
+# in one APIGW post_to_connection. Targets ~20-30 websocket sends per response
+# (down from one-per-token, which dominated streaming latency).
+STREAM_CHUNK_FLUSH_CHARS = 64
+
 
 @measure_execution_time
 def send_message(
@@ -251,18 +256,31 @@ def process_message(message_payload: MessagePayload) -> None:
         connection_valid = [True]
         messageId = request_id
         start_sent = [False]
+        chunk_buffer: list[str] = []
+        buffer_chars = [0]
+
+        def flush_chunk_buffer() -> None:
+            if not chunk_buffer:
+                return
+            combined = "".join(chunk_buffer)
+            chunk_buffer.clear()
+            buffer_chars[0] = 0
+            accumulated_response.append(combined)
+            chunk_response = ResponsePayload.create_message_chunk(
+                request_id=request_id,
+                content=combined,
+                messageId=messageId,
+                conversationId=conversation_id,
+            )
+            send_message(
+                connection_id=connection_id,
+                domain_name=domain_name,
+                stage=stage,
+                message=chunk_response,
+            )
 
         def streaming_callback(chunk: str) -> None:
             if not connection_valid[0]:
-                return
-
-            current_connection_info = get_connection_info(connection_id=connection_id)
-            if current_connection_info is None:
-                logger.warning(
-                    f"Connection {connection_id} disconnected during streaming, "
-                    f"stopping chunk delivery for request {request_id}"
-                )
-                connection_valid[0] = False
                 return
 
             try:
@@ -280,19 +298,10 @@ def process_message(message_payload: MessagePayload) -> None:
                     )
                     start_sent[0] = True
 
-                chunk_response = ResponsePayload.create_message_chunk(
-                    request_id=request_id,
-                    content=chunk,
-                    messageId=messageId,
-                    conversationId=conversation_id,
-                )
-                send_message(
-                    connection_id=connection_id,
-                    domain_name=domain_name,
-                    stage=stage,
-                    message=chunk_response,
-                )
-                accumulated_response.append(chunk)
+                chunk_buffer.append(chunk)
+                buffer_chars[0] += len(chunk)
+                if buffer_chars[0] >= STREAM_CHUNK_FLUSH_CHARS:
+                    flush_chunk_buffer()
             except ClientError as e:
                 if e.response.get("Error", {}).get("Code") == "GoneException":
                     logger.warning(
@@ -305,13 +314,11 @@ def process_message(message_payload: MessagePayload) -> None:
                         f"Error sending streaming chunk: {str(e)}",
                         exc_info=True,
                     )
-                accumulated_response.append(chunk)
             except Exception as chunk_error:
                 logger.error(
                     f"Error sending streaming chunk: {str(chunk_error)}",
                     exc_info=True,
                 )
-                accumulated_response.append(chunk)
 
         response_message, updated_chat_history, eval_metadata = Chat().process_chat(
             query=user_message,
@@ -321,6 +328,27 @@ def process_message(message_payload: MessagePayload) -> None:
             request_id=request_id,
             streaming_callback=streaming_callback,
         )
+
+        if connection_valid[0] and chunk_buffer:
+            try:
+                flush_chunk_buffer()
+            except ClientError as e:
+                if e.response.get("Error", {}).get("Code") == "GoneException":
+                    logger.warning(
+                        f"Connection {connection_id} disconnected during final flush "
+                        f"for request {request_id}"
+                    )
+                    connection_valid[0] = False
+                else:
+                    logger.error(
+                        f"Error flushing final streaming chunk: {str(e)}",
+                        exc_info=True,
+                    )
+            except Exception as flush_error:
+                logger.error(
+                    f"Error flushing final streaming chunk: {str(flush_error)}",
+                    exc_info=True,
+                )
 
         if accumulated_response:
             full_response = "".join(accumulated_response)
@@ -335,43 +363,35 @@ def process_message(message_payload: MessagePayload) -> None:
                 f"Connection {connection_id} was disconnected during streaming, "
                 f"skipping completion message for request {request_id}"
             )
-        else:
-            current_connection_info = get_connection_info(connection_id=connection_id)
-            if current_connection_info is None:
-                logger.warning(
-                    f"Connection {connection_id} disconnected before completion, "
-                    f"skipping completion message for request {request_id}"
+        elif start_sent[0]:
+            try:
+                end_response = ResponsePayload.create_message_end(
+                    request_id=request_id,
+                    messageId=messageId,
+                    conversationId=conversation_id,
                 )
-            else:
-                try:
-                    if start_sent[0]:
-                        end_response = ResponsePayload.create_message_end(
-                            request_id=request_id,
-                            messageId=messageId,
-                            conversationId=conversation_id,
-                        )
-                        send_message(
-                            connection_id=connection_id,
-                            domain_name=domain_name,
-                            stage=stage,
-                            message=end_response,
-                        )
-                except ClientError as e:
-                    if e.response.get("Error", {}).get("Code") == "GoneException":
-                        logger.warning(
-                            f"Connection {connection_id} disconnected while sending completion "
-                            f"for request {request_id}"
-                        )
-                    else:
-                        logger.error(
-                            f"Error sending streaming complete: {str(e)}",
-                            exc_info=True,
-                        )
-                except Exception as complete_error:
+                send_message(
+                    connection_id=connection_id,
+                    domain_name=domain_name,
+                    stage=stage,
+                    message=end_response,
+                )
+            except ClientError as e:
+                if e.response.get("Error", {}).get("Code") == "GoneException":
+                    logger.warning(
+                        f"Connection {connection_id} disconnected while sending completion "
+                        f"for request {request_id}"
+                    )
+                else:
                     logger.error(
-                        f"Error sending streaming complete: {str(complete_error)}",
+                        f"Error sending streaming complete: {str(e)}",
                         exc_info=True,
                     )
+            except Exception as complete_error:
+                logger.error(
+                    f"Error sending streaming complete: {str(complete_error)}",
+                    exc_info=True,
+                )
 
         logger.info(
             "Generated chat response",

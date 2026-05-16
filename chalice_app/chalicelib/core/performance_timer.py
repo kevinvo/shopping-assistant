@@ -1,9 +1,21 @@
 import time
 import logging
 import functools
-from typing import Callable, Any
+from contextlib import contextmanager
+from typing import Callable, Any, Iterator
 
 logger = logging.getLogger()
+
+
+@contextmanager
+def timed_block(name: str) -> Iterator[None]:
+    start = time.time()
+    try:
+        yield
+    finally:
+        logger.info(
+            f"PERFORMANCE: {name} executed in {time.time() - start:.4f} seconds"
+        )
 
 
 def measure_execution_time(func: Callable) -> Callable:
