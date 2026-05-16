@@ -6,7 +6,7 @@ from enum import Enum
 from openai import OpenAI
 from chalicelib.core.config import config as app_config
 from chalicelib.core.performance_timer import measure_execution_time
-from chalicelib.models.data_objects import ChatMessage, RewriteAndHyDEResult
+from chalicelib.models.data_objects import ChatMessage
 from chalicelib.prompts import (
     CONTEXT_AWARE_PROMPT_REWRITING,
     PROMPT_REWRITE_INSTRUCTION,
@@ -126,78 +126,94 @@ class BaseLLM(ABC):
         full_response = self.chat(messages, **kwargs)
         yield full_response
 
-    @traceable(name="rewrite_and_generate_hyde")
+    @staticmethod
+    def _trim_history(
+        message_history: List[ChatMessage], keep_recent: int = 6
+    ) -> List[ChatMessage]:
+        """Keep the system message + the last N user/assistant turns."""
+        copy = message_history.copy()
+        if len(copy) > keep_recent + 1:
+            copy = [copy[0]] + copy[-keep_recent:]
+        return copy
+
+    @traceable(name="rewrite_query")
     @measure_execution_time
-    def rewrite_and_generate_hyde(
+    def rewrite_query(
         self, last_message_content: str, message_history: List[ChatMessage]
-    ) -> RewriteAndHyDEResult:
+    ) -> str:
+        """Rewrite the query using conversation context.
+
+        Resolves pronouns / topic-elision against the recent history. Output
+        is JSON-mode so we can drop max_tokens aggressively.
         """
-        Rewrite the query with context and generate HyDE in a single LLM call.
-        Reuses existing rewrite and HyDE prompts.
-        """
-        logger.info(f"Combined rewrite and HyDE for prompt: {last_message_content}")
-
-        message_history_copy = message_history.copy()
-
-        recent_messages_count = 6
-        if len(message_history_copy) > recent_messages_count + 1:
-            message_history_copy = [message_history_copy[0]] + message_history_copy[
-                -recent_messages_count:
-            ]
-
-        combined_system_prompt = (
-            CONTEXT_AWARE_PROMPT_REWRITING
-            + "\n\nFocus only on the most recent and relevant context. "
-            + "If the user is asking about a new topic, completely ignore previous topics.\n\n"
-            + HYDE_SYSTEM_PROMPT
-        )
-
-        combined_user_prompt = f"""
-    Perform these two tasks in order:
-
-    TASK 1 - Rewrite the query:
-    {PROMPT_REWRITE_INSTRUCTION.format(query=last_message_content)}
-
-    TASK 2 - Generate HyDE (Hypothetical Document Embedding):
-    After rewriting the query, use the rewritten query to generate a brief, consistent hypothetical answer.
-    IMPORTANT: Keep the HyDE response concise (2-3 sentences), focused on product types and key features mentioned in the rewritten query.
-    Be deterministic - similar queries should generate similar HyDE responses.
-    
-    {HYDE_GENERATION_PROMPT.format(query="[USE YOUR REWRITTEN QUERY FROM TASK 1]")}
-
-    Return a JSON object with both results:
-    {{
-      "rewritten_query": "your rewritten query here",
-      "hyde_response": "your brief hypothetical answer here (2-3 sentences max)"
-    }}
-    """
-
-        if len(message_history_copy) > 0:
-            message_history_copy[0] = ChatMessage(
+        logger.info(f"Rewriting prompt: {last_message_content}")
+        messages = self._trim_history(message_history)
+        if messages:
+            messages[0] = ChatMessage(
                 role="system",
-                content=combined_system_prompt,
+                content=(
+                    CONTEXT_AWARE_PROMPT_REWRITING
+                    + "\n\nFocus only on the most recent and relevant context. "
+                    + "If the user is asking about a new topic, completely "
+                    + "ignore previous topics."
+                ),
             )
-
-        message_history_copy.append(
-            ChatMessage(role="user", content=combined_user_prompt)
+        messages.append(
+            ChatMessage(
+                role="user",
+                content=(
+                    PROMPT_REWRITE_INSTRUCTION.format(query=last_message_content)
+                    + '\n\nReturn JSON: {"rewritten_query": "..."}'
+                ),
+            )
         )
-
         response = self.chat(
-            messages=message_history_copy,
-            temperature=0.2,  # Lower temperature for more consistency
-            max_tokens=500,  # Reduced tokens to encourage brevity and consistency
+            messages=messages,
+            temperature=0.2,
+            max_tokens=120,
             json_mode=True,
         )
+        rewritten = json.loads(response).get("rewritten_query") or last_message_content
+        logger.info(f"Rewritten query: {rewritten}")
+        return rewritten
 
-        result = json.loads(response)
+    @traceable(name="generate_hyde")
+    @measure_execution_time
+    def generate_hyde(
+        self, last_message_content: str, message_history: List[ChatMessage]
+    ) -> str:
+        """Generate a hypothetical document embedding (HyDE) seed string.
 
-        logger.info(f"Rewritten query: {result['rewritten_query']}")
-        logger.info(f"HyDE response: {result['hyde_response']}")
-
-        return RewriteAndHyDEResult(
-            rewritten_query=result["rewritten_query"],
-            hyde_response=result["hyde_response"],
+        Uses the conversation history directly (NOT the rewritten query) so
+        this call can run in parallel with rewrite. Output is intentionally
+        short (~30 tokens) -- a keyword-rich phrase outperforms a full
+        paragraph for embedding-space retrieval and generates faster.
+        """
+        logger.info(f"Generating HyDE for prompt: {last_message_content}")
+        messages = self._trim_history(message_history)
+        if messages:
+            messages[0] = ChatMessage(role="system", content=HYDE_SYSTEM_PROMPT)
+        messages.append(
+            ChatMessage(
+                role="user",
+                content=(
+                    HYDE_GENERATION_PROMPT.format(query=last_message_content)
+                    + "\n\nResolve any pronouns or topic ellipsis against the "
+                    + "conversation above. Output a concise comma-separated list "
+                    + "of product types and key features (~20 tokens), not a "
+                    + 'sentence. Return JSON: {"hyde_response": "..."}'
+                ),
+            )
         )
+        response = self.chat(
+            messages=messages,
+            temperature=0.2,
+            max_tokens=80,
+            json_mode=True,
+        )
+        hyde = json.loads(response).get("hyde_response") or last_message_content
+        logger.info(f"HyDE response: {hyde}")
+        return hyde
 
 
 class DeepSeekClient(BaseLLM):

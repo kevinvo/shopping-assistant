@@ -73,37 +73,46 @@ class Chat:
             except Exception as meta_error:
                 logger.warning(f"Failed to add session metadata: {meta_error}")
 
-            # Overlap the rewrite/HyDE LLM call with a raw-query search.
-            # Previously rewrite (~5s) blocked search (~2-14s); now they run
-            # concurrently, so the chain ends at max(rewrite, search) instead
-            # of rewrite + search. The rewritten query is still used for
-            # rerank scoring; we drop the separate rewrite-driven and
-            # HyDE-driven searches because their incremental recall over the
-            # raw-query search hasn't justified the extra wall time.
-            with ThreadPoolExecutor(max_workers=2) as executor:
+            # Fan out three calls at t=0: raw-query search, query rewrite,
+            # and HyDE generation. Both LLM calls get the conversation
+            # history directly so they can resolve pronouns/topic-elision
+            # independently of each other. Once HyDE returns, kick off the
+            # HyDE-driven search. Wall time = max(raw_search,
+            # rewrite, hyde_generation + hyde_search) instead of the
+            # original rewrite + (rewritten_search + hyde_search).
+            with ThreadPoolExecutor(max_workers=3) as executor:
                 raw_search_future = executor.submit(self._perform_search, query)
                 rewrite_future = executor.submit(
-                    self.llm.rewrite_and_generate_hyde,
+                    self.llm.rewrite_query,
+                    last_message_content=query,
+                    message_history=chat_messages,
+                )
+                hyde_future = executor.submit(
+                    self.llm.generate_hyde,
                     last_message_content=query,
                     message_history=chat_messages,
                 )
 
-                result = rewrite_future.result()
-                search_results = raw_search_future.result()
+                hyde_response_query = hyde_future.result()
+                hyde_search_future = executor.submit(
+                    self._perform_search, hyde_response_query
+                )
 
-            rewritten_prompt = result.rewritten_query
-            hype_response_query = result.hyde_response
+                rewritten_prompt = rewrite_future.result()
+                search_results = raw_search_future.result()
+                search_results_from_hype = hyde_search_future.result()
 
             logger.info(f"Original query: {query}")
             logger.info(f"Rewritten query: {rewritten_prompt}")
-            logger.info(f"Hype Response Query: {hype_response_query}")
+            logger.info(f"HyDE response query: {hyde_response_query}")
 
-            search_results_from_hype: List[SearchResult] = []
-            combined_results = search_results
+            combined_results = self._combine_search_results(
+                results1=search_results, results2=search_results_from_hype
+            )
 
-            if not search_results:
+            if len(search_results) == 0 and len(search_results_from_hype) == 0:
                 logger.warning(
-                    f"Raw-query search returned zero results for query: {query[:50]}..."
+                    f"Both searches returned zero results for query: {query[:50]}..."
                 )
 
             # Store pre-rerank results for retrieval metrics
@@ -139,7 +148,7 @@ class Chat:
             eval_metadata = {
                 "chat_history_length": len(chat_history),
                 "rewritten_query": rewritten_prompt,
-                "hyde_query": hype_response_query,
+                "hyde_query": hyde_response_query,
                 "num_rewritten_results": len(search_results),
                 "num_hyde_results": len(search_results_from_hype),
                 "num_combined_results": len(combined_results),
@@ -166,7 +175,7 @@ class Chat:
                         "socket_id": socket_id,
                         "chat_history_length": len(chat_history),
                         "rewritten_query": rewritten_prompt,
-                        "hyde_query": hype_response_query,
+                        "hyde_query": hyde_response_query,
                         "num_combined_results": len(combined_results),
                         "num_reranked_results": len(reranked_results),
                         "num_rewritten_results": len(search_results),
