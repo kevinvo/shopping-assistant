@@ -25,8 +25,13 @@ EVALUATION_QUEUE_URL = os.environ.get("EVALUATION_QUEUE_URL")
 
 # Buffer LLM-streamed tokens until this many characters accumulate, then flush
 # in one APIGW post_to_connection. Targets ~20-30 websocket sends per response
-# (down from one-per-token, which dominated streaming latency).
+# (down from one-per-token, which dominated streaming latency). The very first
+# chunk is flushed eagerly so the user sees text before the buffer fills.
 STREAM_CHUNK_FLUSH_CHARS = 64
+
+# API Gateway raises ClientError with this code when the websocket peer has
+# disconnected. Promoted to a constant so the three handlers stay in sync.
+GONE_EXCEPTION = "GoneException"
 
 
 @measure_execution_time
@@ -72,7 +77,7 @@ def send_message(
         )
         logger.info(f"Successfully sent message to connection {connection_id}")
     except ClientError as e:
-        if e.response["Error"]["Code"] == "GoneException":
+        if e.response["Error"]["Code"] == GONE_EXCEPTION:
             logger.warning(f"Connection {connection_id} is no longer valid")
         else:
             logger.error(f"Error sending message: {str(e)}", exc_info=True)
@@ -256,16 +261,16 @@ def process_message(message_payload: MessagePayload) -> None:
         connection_valid = [True]
         messageId = request_id
         start_sent = [False]
+        first_flush_done = [False]
         chunk_buffer: list[str] = []
-        buffer_chars = [0]
 
         def flush_chunk_buffer() -> None:
             if not chunk_buffer:
                 return
             combined = "".join(chunk_buffer)
             chunk_buffer.clear()
-            buffer_chars[0] = 0
             accumulated_response.append(combined)
+            first_flush_done[0] = True
             chunk_response = ResponsePayload.create_message_chunk(
                 request_id=request_id,
                 content=combined,
@@ -281,6 +286,9 @@ def process_message(message_payload: MessagePayload) -> None:
 
         def streaming_callback(chunk: str) -> None:
             if not connection_valid[0]:
+                # Capture for full-response logging even though the client is
+                # gone; the model already produced these tokens.
+                accumulated_response.append(chunk)
                 return
 
             try:
@@ -299,11 +307,15 @@ def process_message(message_payload: MessagePayload) -> None:
                     start_sent[0] = True
 
                 chunk_buffer.append(chunk)
-                buffer_chars[0] += len(chunk)
-                if buffer_chars[0] >= STREAM_CHUNK_FLUSH_CHARS:
+                # Flush the very first chunk eagerly so the user sees text
+                # immediately; coalesce subsequent chunks up to the threshold.
+                if (
+                    not first_flush_done[0]
+                    or sum(map(len, chunk_buffer)) >= STREAM_CHUNK_FLUSH_CHARS
+                ):
                     flush_chunk_buffer()
             except ClientError as e:
-                if e.response.get("Error", {}).get("Code") == "GoneException":
+                if e.response.get("Error", {}).get("Code") == GONE_EXCEPTION:
                     logger.warning(
                         f"Connection {connection_id} disconnected during streaming chunk send, "
                         f"stopping chunk delivery for request {request_id}"
@@ -333,7 +345,7 @@ def process_message(message_payload: MessagePayload) -> None:
             try:
                 flush_chunk_buffer()
             except ClientError as e:
-                if e.response.get("Error", {}).get("Code") == "GoneException":
+                if e.response.get("Error", {}).get("Code") == GONE_EXCEPTION:
                     logger.warning(
                         f"Connection {connection_id} disconnected during final flush "
                         f"for request {request_id}"
@@ -377,7 +389,7 @@ def process_message(message_payload: MessagePayload) -> None:
                     message=end_response,
                 )
             except ClientError as e:
-                if e.response.get("Error", {}).get("Code") == "GoneException":
+                if e.response.get("Error", {}).get("Code") == GONE_EXCEPTION:
                     logger.warning(
                         f"Connection {connection_id} disconnected while sending completion "
                         f"for request {request_id}"

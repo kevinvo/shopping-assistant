@@ -19,53 +19,22 @@ def timed_block(name: str) -> Iterator[None]:
 
 
 def measure_execution_time(func: Callable) -> Callable:
-    """
-    Decorator to measure and log the execution time of a function.
-
-    Args:
-        func: The function to be decorated
-
-    Returns:
-        The wrapped function with execution time measurement
-    """
-
     @functools.wraps(func)
     def wrapper(*args, **kwargs) -> Any:
-        start_time = time.time()
-        result = func(*args, **kwargs)
-        end_time = time.time()
-        execution_time = end_time - start_time
-
-        # Get function name and class name if it's a method
-        if hasattr(args[0].__class__, func.__name__) if args else False:
-            # It's a method, get the class name
-            class_name = args[0].__class__.__name__
-            function_name = f"{class_name}.{func.__name__}"
+        if args and hasattr(args[0].__class__, func.__name__):
+            name = f"{args[0].__class__.__name__}.{func.__name__}"
         else:
-            # It's a regular function
-            function_name = func.__name__
-
-        logger.info(
-            f"PERFORMANCE: {function_name} executed in {execution_time:.4f} seconds"
-        )
-        return result
+            name = func.__name__
+        with timed_block(name):
+            return func(*args, **kwargs)
 
     return wrapper
 
 
 def measure_performance(func: Callable) -> Callable:
-    """Simplified performance decorator retained for backwards compatibility."""
-
     @functools.wraps(func)
     def wrapper(*args, **kwargs) -> Any:
-        start_time = time.time()
-        result = func(*args, **kwargs)
-        end_time = time.time()
-        logger.info(
-            "PERFORMANCE: %s executed in %.4f seconds",
-            func.__qualname__,
-            end_time - start_time,
-        )
-        return result
+        with timed_block(func.__qualname__):
+            return func(*args, **kwargs)
 
     return wrapper
