@@ -27,6 +27,14 @@ os.environ["LANGCHAIN_TRACING_V2"] = "true"
 os.environ["LANGCHAIN_PROJECT"] = "pr-respectful-icicle-91"
 
 
+# User-facing progress text rendered as a Perplexity-style trace above the
+# streaming assistant bubble. Tests import these so producer and assertion
+# stay in lockstep when the copy changes.
+STATUS_SEARCHING = "Searching Reddit…"
+STATUS_READING = "Reading top results…"
+STATUS_WRITING = "Writing response…"
+
+
 class Chat:
     def __init__(self):
         self.indexer = IndexerFactory.create_indexer()
@@ -72,6 +80,20 @@ class Chat:
                     )
             except Exception as meta_error:
                 logger.warning(f"Failed to add session metadata: {meta_error}")
+
+            # Best-effort progressive status events for the frontend. None
+            # when the caller doesn't care (tests, background jobs).
+            status_callback = kwargs.get("status_callback")
+
+            def emit_status(text: str) -> None:
+                if status_callback is None:
+                    return
+                try:
+                    status_callback(text)
+                except Exception as e:
+                    logger.warning(f"status_callback raised, ignoring: {e}")
+
+            emit_status(STATUS_SEARCHING)
 
             # Fan out three calls at t=0: raw-query search, query rewrite,
             # and HyDE generation. Both LLM calls get the conversation
@@ -138,6 +160,8 @@ class Chat:
             # Get relevance scores from reranker for retrieval metrics
             reranker_scores = self.reranker.get_relevance_scores()
 
+            emit_status(STATUS_READING)
+
             search_result_context = self._build_context(search_results=reranked_results)
 
             updated_chat_history = self._prepare_chat_history(
@@ -146,6 +170,8 @@ class Chat:
                 query=query,
                 rewritten_query=rewritten_prompt,
             )
+
+            emit_status(STATUS_WRITING)
 
             # Generate response (with optional streaming callback)
             streaming_callback = kwargs.get("streaming_callback")

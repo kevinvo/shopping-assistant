@@ -372,6 +372,7 @@ class ResponsePayload:
         *,
         request_id: str,
         content: str = "Your request is being processed...",
+        messageId: Optional[str] = None,
         conversationId: Optional[str] = None,
     ) -> "ResponsePayload":
         """Create a new processing response with the current timestamp."""
@@ -380,6 +381,7 @@ class ResponsePayload:
             content=content,
             request_id=request_id,
             timestamp=datetime.now().isoformat(),
+            messageId=messageId,
             conversationId=conversationId,
         )
 
