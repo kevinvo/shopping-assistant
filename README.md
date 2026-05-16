@@ -212,6 +212,118 @@ window. Both are scheduled for removal once logs confirm no misses:
 `ConnectionInfo.chat_history` is now dead weight (written empty on connect,
 never read or appended to) and will be removed in a follow-up cleanup.
 
+### Reducing chat startup time
+
+Goal: time from inbound user message to first response chunk ≤ 10s on a warm
+container. Achieved at ~5s today. This is the playbook used to get there and
+the moves still on the table if the floor needs to drop further.
+
+**The two speed regimes.** A chat invocation either hits a *warm* container
+(Python process already loaded, singletons primed, TLS pools to OpenAI /
+OpenRouter / Qdrant established) or a *cold* one (none of the above). The
+floor for cold is ~20s of one-time work before any chat work begins
+regardless of code changes. The strategy is to make warm fast *and* keep
+chat_processor warm so users never hit cold.
+
+#### Make warm fast
+
+1. **Singleton everything boto and HTTP-client-shaped.**
+   `chalicelib/sessions/chat_message_service.py:get_chat()` is the
+   module-level lazy singleton for `Chat` → `QdrantIndexer` → `OpenAIEmbeddings`
+   → `boto3.client("s3")` → `DeepSeekClient` → `BM25Reranker`. Constructing
+   any of these per-request silently discards the HTTP/TLS pool to the
+   upstream service. `AppConfig` is also a module-level singleton at
+   `chalicelib/core/config.py:228` — importing the class and calling
+   `AppConfig()` again re-runs the Secrets Manager fetch (~200ms warm, ~3-5s
+   cold). Always import `config`, never `AppConfig`.
+
+2. **Cache anything with a per-call constructor cost.** The API Gateway
+   Management client (`apigatewaymanagementapi`) is built per-call inside
+   `send_message` and cached via `_apigw_client_for(domain, stage)` with
+   `lru_cache(maxsize=8)`. LangChain's `ChatOpenAI` is similarly cached per
+   `(temperature, top_p, max_tokens, json_mode)` on `DeepSeekClient`. Each
+   one was ~10-30ms × 20 calls per response.
+
+3. **Persist BM25 vocab to S3.** `QdrantIndexer._generate_query_sparse_vector`
+   needs a term→index dictionary and an IDF table to build the query sparse
+   vector. Rebuilding from a 10k-document Qdrant scroll costs ~7.6s. The
+   dicts are written to
+   `s3://<processed-reddit-data>/vocab/<collection>.json` after the first
+   rebuild; subsequent cold starts load them in ~50ms.
+
+4. **Overlap rewrite with search.** `Chat.process_chat` runs
+   `rewrite_and_generate_hyde` (one LLM call, ~5s) concurrently with the
+   primary `hybrid_search`. The chain ends at `max(rewrite, search)` instead
+   of `rewrite + search`. Both the rewrite output and the raw user query are
+   still surfaced — rewrite feeds rerank scoring, the raw query feeds search.
+
+5. **Coalesce streaming chunks.** Per-token APIGW `post_to_connection` is
+   ~70ms each. The streaming callback buffers 64 chars before each flush
+   (`STREAM_CHUNK_FLUSH_CHARS` in `chat_message_service.py`); the first
+   chunk flushes eagerly so the user sees text immediately. A 256-token
+   response goes from ~256 sends to ~25.
+
+#### Keep chat_processor warm
+
+`keep_chat_warm` in `chalice_app/app.py` runs on a `Rate(3, MINUTES)`
+schedule and enqueues a sentinel `{"keep_warm": true}` message to the
+`ChatProcessingQueue`. `chat_processor` recognizes the sentinel via
+`is_keep_warm_record(body)` and short-circuits to `prime_singletons()`
+instead of going through `process_message`. `prime_singletons()` forces:
+
+- `get_chat()` — builds the full singleton tree
+- `_generate_query_sparse_vector("warmup")` — loads BM25 vocab from S3
+- `embeddings.embed_query("warmup")` — establishes OpenAI httpx TLS pool
+
+Cost ~$0.03/month. AWS recycles idle Lambda containers after ~10-15 min,
+so a 3-min cadence is the smallest cushion that keeps the container alive.
+60-min would always be cold. Function name kept short (`keep_chat_warm`,
+not `keep_chat_processor_warm`) to fit EventBridge's 64-char rule-name
+limit — same issue PR #14 hit on `refresh_suggestions`.
+
+#### Measuring
+
+`chalicelib/core/performance_timer.py` provides `@measure_execution_time`
+(decorator) and `timed_block(name)` (context manager). Both emit:
+
+```
+PERFORMANCE: <name> executed in X.XXXX seconds
+```
+
+Use the **`monitor_all_logs.sh`** helper in `chalice_app/tests/scripts/` to
+tail or analyze production logs:
+
+```bash
+./chalice_app/tests/scripts/monitor_all_logs.sh recent 15m chat
+./chalice_app/tests/scripts/monitor_all_logs.sh follow chat
+./chalice_app/tests/scripts/monitor_all_logs.sh analyze 24h chat
+```
+
+**Important — Lambda Duration ≠ TTFT.** "TTFT" is the time from START to
+the first `MESSAGE_START` payload reaching APIGW. Lambda Duration is the
+full handler runtime, which includes the LLM streaming its *entire*
+response to completion *after* the first chunk has already shipped to the
+user. A 22s Lambda Duration with a 5s TTFT is a normal warm response, not
+a slow one. To measure TTFT, diff the `START RequestId` timestamp against
+the first `Message content (ResponsePayload): {'type': <MessageType.MESSAGE_START` log line.
+
+#### What's still on the table
+
+- **Lambda region move to match Qdrant.** Qdrant Cloud is in `eu-west-2`;
+  Lambda is in `ap-southeast-1`. Singapore ↔ London RTT (~160ms) adds
+  300-500ms per Qdrant round-trip and ~200-400ms per OpenAI embeddings call.
+  Same-region projection saves 1-2s warm and 3-5s cold. Requires migrating
+  DynamoDB (Global Tables), S3 (Cross-Region Replication), Secrets Manager
+  (multi-region), and re-pointing the front-end at the new WebSocket URL.
+- **Provisioned concurrency on chat_processor.** Eliminates cold starts at
+  the cost of ~$X/month per concurrent unit. Only worth doing if the
+  3-minute keep-warm cadence proves insufficient (i.e. real traffic gaps
+  exceed AWS's idle-recycle window).
+- **Drop LangChain on the hot path.** ~13s of cold-start import time is
+  LangChain's own module graph. Switching to direct OpenAI/Anthropic SDK
+  calls would shave ~5-8s of cold init and trim ~50-150ms warm per LLM
+  call. Big refactor.
+
 ## Prerequisites
 
 - **Python**: 3.12+
