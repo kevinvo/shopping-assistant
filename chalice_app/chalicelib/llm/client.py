@@ -227,7 +227,13 @@ class DeepSeekClient(BaseLLM):
             base_url="https://openrouter.ai/api/v1",
             default_headers=self._build_headers(),
         )
-        self.model = "deepseek/deepseek-chat"
+        # `:nitro` tells OpenRouter to route each call to whichever upstream
+        # provider is currently fastest (DeepInfra, Fireworks, etc.) instead
+        # of cheapest. Trades ~2-3x per-token cost for much lower TTFT
+        # variance -- the 0.7s vs 7s swings we saw in production logs were
+        # the default routing landing on a slow provider. Falls back to the
+        # default pool automatically if `:nitro` is rate-limited.
+        self.model = "deepseek/deepseek-chat:nitro"
         # Cache ChatOpenAI by the kwargs that vary across calls. Building a
         # fresh ChatOpenAI per call discards the underlying httpx pool to
         # OpenRouter and adds ~100-200ms of TLS setup per invocation. In
