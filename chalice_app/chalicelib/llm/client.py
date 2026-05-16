@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import List, Generator
+from typing import List, Generator, Optional
 from abc import ABC, abstractmethod
 from enum import Enum
 from openai import OpenAI
@@ -12,6 +12,8 @@ from chalicelib.prompts import (
     PROMPT_REWRITE_INSTRUCTION,
     HYDE_GENERATION_PROMPT,
     HYDE_SYSTEM_PROMPT,
+    REWRITE_JSON_SUFFIX,
+    HYDE_USER_INSTRUCTION_SUFFIX,
 )
 from langsmith import traceable
 from langchain_openai import ChatOpenAI
@@ -136,6 +138,18 @@ class BaseLLM(ABC):
             copy = [copy[0]] + copy[-keep_recent:]
         return copy
 
+    def _build_chat_messages(
+        self,
+        message_history: List[ChatMessage],
+        system_prompt: str,
+        user_prompt: str,
+    ) -> List[ChatMessage]:
+        messages = self._trim_history(message_history)
+        if messages:
+            messages[0] = ChatMessage(role="system", content=system_prompt)
+        messages.append(ChatMessage(role="user", content=user_prompt))
+        return messages
+
     @traceable(name="rewrite_query")
     @measure_execution_time
     def rewrite_query(
@@ -143,29 +157,21 @@ class BaseLLM(ABC):
     ) -> str:
         """Rewrite the query using conversation context.
 
-        Resolves pronouns / topic-elision against the recent history. Output
-        is JSON-mode so we can drop max_tokens aggressively.
+        Resolves pronouns / topic-elision against the recent history. JSON
+        mode so we can keep max_tokens tight.
         """
-        logger.info(f"Rewriting prompt: {last_message_content}")
-        messages = self._trim_history(message_history)
-        if messages:
-            messages[0] = ChatMessage(
-                role="system",
-                content=(
-                    CONTEXT_AWARE_PROMPT_REWRITING
-                    + "\n\nFocus only on the most recent and relevant context. "
-                    + "If the user is asking about a new topic, completely "
-                    + "ignore previous topics."
-                ),
-            )
-        messages.append(
-            ChatMessage(
-                role="user",
-                content=(
-                    PROMPT_REWRITE_INSTRUCTION.format(query=last_message_content)
-                    + '\n\nReturn JSON: {"rewritten_query": "..."}'
-                ),
-            )
+        messages = self._build_chat_messages(
+            message_history,
+            system_prompt=(
+                CONTEXT_AWARE_PROMPT_REWRITING
+                + "\n\nFocus only on the most recent and relevant context. "
+                + "If the user is asking about a new topic, completely "
+                + "ignore previous topics."
+            ),
+            user_prompt=(
+                PROMPT_REWRITE_INSTRUCTION.format(query=last_message_content)
+                + REWRITE_JSON_SUFFIX
+            ),
         )
         response = self.chat(
             messages=messages,
@@ -173,46 +179,42 @@ class BaseLLM(ABC):
             max_tokens=120,
             json_mode=True,
         )
-        rewritten = json.loads(response).get("rewritten_query") or last_message_content
-        logger.info(f"Rewritten query: {rewritten}")
-        return rewritten
+        return json.loads(response).get("rewritten_query") or last_message_content
 
     @traceable(name="generate_hyde")
     @measure_execution_time
     def generate_hyde(
         self, last_message_content: str, message_history: List[ChatMessage]
-    ) -> str:
+    ) -> Optional[str]:
         """Generate a hypothetical document embedding (HyDE) seed string.
 
         Uses the conversation history directly (NOT the rewritten query) so
         this call can run in parallel with rewrite. Output is intentionally
-        short (~30 tokens) -- a keyword-rich phrase outperforms a full
-        paragraph for embedding-space retrieval and generates faster.
+        short (~20 tokens) -- a keyword-rich phrase outperforms a paragraph
+        for embedding-space retrieval and generates faster. Skipping JSON
+        mode here trims ~100-300 ms of TTFT on the short output.
+
+        Returns None when the model produces nothing usable, signaling the
+        caller to skip the HyDE-driven search rather than embedding the raw
+        query a second time and burning ~1.3 s of Qdrant round-trip on
+        results we'd just dedupe away in _combine_search_results.
         """
-        logger.info(f"Generating HyDE for prompt: {last_message_content}")
-        messages = self._trim_history(message_history)
-        if messages:
-            messages[0] = ChatMessage(role="system", content=HYDE_SYSTEM_PROMPT)
-        messages.append(
-            ChatMessage(
-                role="user",
-                content=(
-                    HYDE_GENERATION_PROMPT.format(query=last_message_content)
-                    + "\n\nResolve any pronouns or topic ellipsis against the "
-                    + "conversation above. Output a concise comma-separated list "
-                    + "of product types and key features (~20 tokens), not a "
-                    + 'sentence. Return JSON: {"hyde_response": "..."}'
-                ),
-            )
+        messages = self._build_chat_messages(
+            message_history,
+            system_prompt=HYDE_SYSTEM_PROMPT,
+            user_prompt=(
+                HYDE_GENERATION_PROMPT.format(query=last_message_content)
+                + HYDE_USER_INSTRUCTION_SUFFIX
+            ),
         )
         response = self.chat(
             messages=messages,
             temperature=0.2,
-            max_tokens=80,
-            json_mode=True,
+            max_tokens=40,
         )
-        hyde = json.loads(response).get("hyde_response") or last_message_content
-        logger.info(f"HyDE response: {hyde}")
+        hyde = response.strip()
+        if not hyde:
+            return None
         return hyde
 
 
@@ -227,13 +229,16 @@ class DeepSeekClient(BaseLLM):
             base_url="https://openrouter.ai/api/v1",
             default_headers=self._build_headers(),
         )
-        # `:nitro` tells OpenRouter to route each call to whichever upstream
-        # provider is currently fastest (DeepInfra, Fireworks, etc.) instead
-        # of cheapest. Trades ~2-3x per-token cost for much lower TTFT
-        # variance -- the 0.7s vs 7s swings we saw in production logs were
-        # the default routing landing on a slow provider. Falls back to the
-        # default pool automatically if `:nitro` is rate-limited.
+        # `:nitro` routes through whichever upstream provider is currently
+        # fastest (DeepInfra, Fireworks, etc.) at ~2-3x per-token cost. We
+        # use it for the short latency-sensitive calls (rewrite + HyDE) where
+        # the variance was costing us 4-7s of TTFT, but NOT for the final
+        # answer stream -- stream_model emits 20-50x more tokens per call,
+        # so paying nitro's premium there would dominate the LLM bill for
+        # marginal user-perceived benefit (the user is already reading by
+        # the time the slow tokens arrive).
         self.model = "deepseek/deepseek-chat:nitro"
+        self.stream_model = "deepseek/deepseek-chat"
         # Cache ChatOpenAI by the kwargs that vary across calls. Building a
         # fresh ChatOpenAI per call discards the underlying httpx pool to
         # OpenRouter and adds ~100-200ms of TLS setup per invocation. In
@@ -260,12 +265,13 @@ class DeepSeekClient(BaseLLM):
     def _get_langchain_client(
         self,
         *,
+        model: str,
         temperature: float,
         top_p: float,
         max_tokens: int,
         json_mode: bool,
     ) -> ChatOpenAI:
-        key = (temperature, top_p, max_tokens, json_mode)
+        key = (model, temperature, top_p, max_tokens, json_mode)
         client = self._langchain_cache.get(key)
         if client is not None:
             return client
@@ -274,7 +280,7 @@ class DeepSeekClient(BaseLLM):
         if json_mode:
             model_kwargs["response_format"] = {"type": "json_object"}
         client = ChatOpenAI(
-            model=self.model,
+            model=model,
             api_key=SecretStr(self.config.openrouter_api_key),
             base_url="https://openrouter.ai/api/v1",
             temperature=temperature,
@@ -292,6 +298,7 @@ class DeepSeekClient(BaseLLM):
         try:
             langchain_messages = [m.to_langchain_message() for m in messages]
             langchain_client = self._get_langchain_client(
+                model=self.model,
                 temperature=kwargs.get("temperature", 0.7),
                 top_p=kwargs.get("top_p", 0.95),
                 max_tokens=kwargs.get("max_tokens", 2000),
@@ -311,6 +318,7 @@ class DeepSeekClient(BaseLLM):
         try:
             langchain_messages = [m.to_langchain_message() for m in messages]
             langchain_client = self._get_langchain_client(
+                model=self.stream_model,
                 temperature=kwargs.get("temperature", 0.7),
                 top_p=kwargs.get("top_p", 0.95),
                 max_tokens=kwargs.get("max_tokens", 2000),

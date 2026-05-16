@@ -77,10 +77,16 @@ class Chat:
             # and HyDE generation. Both LLM calls get the conversation
             # history directly so they can resolve pronouns/topic-elision
             # independently of each other. Once HyDE returns, kick off the
-            # HyDE-driven search. Wall time = max(raw_search,
-            # rewrite, hyde_generation + hyde_search) instead of the
-            # original rewrite + (rewritten_search + hyde_search).
-            with ThreadPoolExecutor(max_workers=3) as executor:
+            # HyDE-driven search -- unless the model produced nothing
+            # usable, in which case running a Qdrant round trip on the
+            # raw query would just duplicate raw_search and be dedupe'd
+            # away in _combine_search_results, wasting ~1.3s on the
+            # critical path.
+            #
+            # max_workers=4 so raw_search, rewrite, hyde_generation, and
+            # hyde_search can all be in flight concurrently when HyDE
+            # finishes early.
+            with ThreadPoolExecutor(max_workers=4) as executor:
                 raw_search_future = executor.submit(self._perform_search, query)
                 rewrite_future = executor.submit(
                     self.llm.rewrite_query,
@@ -94,13 +100,17 @@ class Chat:
                 )
 
                 hyde_response_query = hyde_future.result()
-                hyde_search_future = executor.submit(
-                    self._perform_search, hyde_response_query
+                hyde_search_future = (
+                    executor.submit(self._perform_search, hyde_response_query)
+                    if hyde_response_query
+                    else None
                 )
 
                 rewritten_prompt = rewrite_future.result()
                 search_results = raw_search_future.result()
-                search_results_from_hype = hyde_search_future.result()
+                search_results_from_hype = (
+                    hyde_search_future.result() if hyde_search_future else []
+                )
 
             logger.info(f"Original query: {query}")
             logger.info(f"Rewritten query: {rewritten_prompt}")
