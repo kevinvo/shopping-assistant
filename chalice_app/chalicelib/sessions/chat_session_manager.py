@@ -34,6 +34,15 @@ STATUS_SEARCHING = "Searching Reddit…"
 STATUS_READING = "Reading top results…"
 STATUS_WRITING = "Writing response…"
 
+# Below the LLM provider's 0.7 default to reduce responder hedging when
+# the retrieved search context is marginally on-topic (e.g., a niche
+# query the Reddit corpus only covers tangentially). At 0.7 the same
+# inputs sometimes produce a synthesis ("Based on the discussions…") and
+# sometimes a refusal ("I don't have enough information…"). 0.3 keeps
+# enough variation for natural phrasing while consistently landing on
+# the higher-probability synthesis path.
+RESPONSE_TEMPERATURE = 0.3
+
 
 class Chat:
     def __init__(self):
@@ -365,12 +374,16 @@ class Chat:
     ) -> str:
         if streaming_callback:
             full_response = ""
-            for chunk in self.llm.stream_chat(messages=chat_history):
+            for chunk in self.llm.stream_chat(
+                messages=chat_history, temperature=RESPONSE_TEMPERATURE
+            ):
                 full_response += chunk
                 streaming_callback(chunk)
             return full_response
         else:
-            response = self.llm.chat(messages=chat_history)
+            response = self.llm.chat(
+                messages=chat_history, temperature=RESPONSE_TEMPERATURE
+            )
             return response
 
     def _prepare_results_for_metrics(
