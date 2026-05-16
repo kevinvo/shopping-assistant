@@ -11,8 +11,6 @@ Real LLM behavior is exercised by chalice_app/scripts/check_topic_shift.py.
 
 from typing import Any, Dict, List
 
-import pytest
-
 from chalicelib.llm.client import (
     BaseLLM,
     _HYDE_HISTORY_TAIL,
