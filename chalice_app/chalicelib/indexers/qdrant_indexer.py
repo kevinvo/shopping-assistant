@@ -4,6 +4,9 @@ from langchain.schema import Document
 from dataclasses import dataclass
 from collections import Counter
 import os
+import json
+import boto3
+from botocore.exceptions import ClientError
 from chalicelib.core.config import config
 from chalicelib.core.logger_config import setup_logger
 from qdrant_client import QdrantClient
@@ -166,6 +169,9 @@ class QdrantIndexer:
         # This will be populated when documents are indexed
         self._vocabulary_indices: Dict[str, int] = {}
         self._idf: Dict[str, float] = {}
+        self._s3_client = boto3.client("s3")
+        self._vocab_bucket = config.processed_reddit_data_bucket_name
+        self._vocab_key = f"vocab/{self.collection_name}.json"
 
     def _tokenize(self, text: str) -> List[str]:
         """Tokenize text with punctuation removal and stopword filtering."""
@@ -477,10 +483,74 @@ class QdrantIndexer:
             f"Sparse vector rebuild complete. Processed {len(all_points)} documents."
         )
 
+    def _load_vocab_from_s3(self) -> bool:
+        """Try to populate vocabulary/IDF from the cached S3 object.
+
+        Returns True if loaded successfully. We swallow NoSuchKey so the
+        cold-start path falls back to scrolling Qdrant and rebuilding.
+        """
+        try:
+            with timed_block("vocab_cache.s3_get"):
+                obj = self._s3_client.get_object(
+                    Bucket=self._vocab_bucket, Key=self._vocab_key
+                )
+                payload = json.loads(obj["Body"].read())
+            self._vocabulary_indices = payload["vocabulary_indices"]
+            self._idf = payload["idf"]
+            logger.info(
+                f"Loaded vocabulary cache from s3://{self._vocab_bucket}/{self._vocab_key} "
+                f"({len(self._vocabulary_indices)} terms)"
+            )
+            return True
+        except ClientError as e:
+            code = e.response.get("Error", {}).get("Code")
+            if code in ("NoSuchKey", "404"):
+                logger.info(
+                    f"No vocabulary cache at s3://{self._vocab_bucket}/{self._vocab_key}; "
+                    "will rebuild from collection"
+                )
+            else:
+                logger.warning(f"Vocabulary cache load failed ({code}); will rebuild")
+            return False
+        except Exception as e:
+            logger.warning(f"Vocabulary cache load failed ({e}); will rebuild")
+            return False
+
+    def _save_vocab_to_s3(self) -> None:
+        """Persist the current vocabulary/IDF dicts to S3.
+
+        Failures are logged but never raised — the caller already has a
+        usable in-memory vocabulary."""
+        if not self._vocabulary_indices or not self._idf:
+            return
+        try:
+            with timed_block("vocab_cache.s3_put"):
+                payload = json.dumps(
+                    {
+                        "vocabulary_indices": self._vocabulary_indices,
+                        "idf": self._idf,
+                    }
+                ).encode("utf-8")
+                self._s3_client.put_object(
+                    Bucket=self._vocab_bucket,
+                    Key=self._vocab_key,
+                    Body=payload,
+                    ContentType="application/json",
+                )
+            logger.info(
+                f"Saved vocabulary cache to s3://{self._vocab_bucket}/{self._vocab_key} "
+                f"({len(self._vocabulary_indices)} terms, {len(payload)} bytes)"
+            )
+        except Exception as e:
+            logger.warning(f"Vocabulary cache save failed ({e})")
+
     def _generate_query_sparse_vector(self, query: str) -> models.SparseVector:
         """Generate a sparse vector for the query using stored vocabulary and IDF."""
         if not self._vocabulary_indices or not self._idf:
-            self._rebuild_vocabulary_from_collection()
+            # Try the S3 cache first; only scroll Qdrant if the cache is cold.
+            if not self._load_vocab_from_s3():
+                self._rebuild_vocabulary_from_collection()
+                self._save_vocab_to_s3()
 
         tokens = self._tokenize(query)
         term_freq = Counter(tokens)
