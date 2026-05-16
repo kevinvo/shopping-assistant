@@ -80,11 +80,14 @@ def _apigw_client_for(domain_name: str, stage: str):
     )
 
 
-# Buffer LLM-streamed tokens until this many characters accumulate, then flush
-# in one APIGW post_to_connection. Targets ~20-30 websocket sends per response
-# (down from one-per-token, which dominated streaming latency). The very first
-# chunk is flushed eagerly so the user sees text before the buffer fills.
-STREAM_CHUNK_FLUSH_CHARS = 64
+# Buffer LLM-streamed tokens until this many characters accumulate, then
+# flush in one APIGW post_to_connection. Bumped from 64 -> 128 once we
+# started sending message_start immediately on receipt (frontend shows
+# typing dots at t=0.1s, decoupled from the first content chunk), so the
+# perceived snappiness no longer depends on tiny content flushes. Bigger
+# batches mean fewer APIGW round-trips and slightly smoother delivery
+# once the LLM starts producing tokens.
+STREAM_CHUNK_FLUSH_CHARS = 128
 
 # API Gateway raises ClientError with this code when the websocket peer has
 # disconnected. Promoted to a constant so the three handlers stay in sync.
@@ -315,7 +318,11 @@ def process_message(message_payload: MessagePayload) -> None:
         accumulated_response = []
         connection_valid = [True]
         messageId = request_id
-        start_sent = [False]
+        # Fire message_start *before* any LLM work so the frontend can show a
+        # typing indicator at ~100ms instead of waiting ~5s for the first
+        # content token. The streaming callback later assumes the frame is
+        # already on the wire, so start_sent begins True.
+        start_sent = [True]
         first_flush_done = [False]
         chunk_buffer: list[str] = []
 
@@ -374,24 +381,6 @@ def process_message(message_payload: MessagePayload) -> None:
                 accumulated_response.append(chunk)
                 return
 
-            if not start_sent[0]:
-                ok = safe_invoke(
-                    lambda: send_message(
-                        connection_id=connection_id,
-                        domain_name=domain_name,
-                        stage=stage,
-                        message=ResponsePayload.create_message_start(
-                            request_id=request_id,
-                            messageId=messageId,
-                            conversationId=conversation_id,
-                        ),
-                    ),
-                    context="streaming start",
-                )
-                if not ok:
-                    return
-                start_sent[0] = True
-
             chunk_buffer.append(chunk)
             # Flush the very first chunk eagerly so the user sees text
             # immediately; coalesce subsequent chunks up to the threshold.
@@ -400,6 +389,26 @@ def process_message(message_payload: MessagePayload) -> None:
                 or sum(map(len, chunk_buffer)) >= STREAM_CHUNK_FLUSH_CHARS
             ):
                 safe_invoke(flush_chunk_buffer, context="streaming chunk")
+
+        # Fire message_start NOW, before the LLM pipeline. Frontend gets the
+        # typing indicator at network latency (~100ms) instead of waiting for
+        # rewrite + search + first LLM token (~5s). If this send fails, we
+        # never started anything user-facing, so just give up like the
+        # original short-circuit on a dead connection.
+        if not safe_invoke(
+            lambda: send_message(
+                connection_id=connection_id,
+                domain_name=domain_name,
+                stage=stage,
+                message=ResponsePayload.create_message_start(
+                    request_id=request_id,
+                    messageId=messageId,
+                    conversationId=conversation_id,
+                ),
+            ),
+            context="streaming start",
+        ):
+            return
 
         response_message, updated_chat_history, eval_metadata = get_chat().process_chat(
             query=user_message,
