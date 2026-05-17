@@ -10,7 +10,7 @@ the application. Prompts are organized by domain:
 - suggested_prompts: Empty-state starter prompt generation
 """
 
-from chalicelib.prompts.personas import PERSONA
+from chalicelib.prompts.personas import PERSONA, get_persona
 from chalicelib.prompts.query_processing import (
     CONTEXT_AWARE_PROMPT_REWRITING,
     PROMPT_REWRITE_INSTRUCTION,
@@ -35,6 +35,7 @@ from chalicelib.prompts.suggested_prompts import (
 __all__ = [
     # Personas
     "PERSONA",
+    "get_persona",
     # Query processing
     "CONTEXT_AWARE_PROMPT_REWRITING",
     "PROMPT_REWRITE_INSTRUCTION",
