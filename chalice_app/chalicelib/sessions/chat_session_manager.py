@@ -15,7 +15,7 @@ from chalicelib.llm import LLMFactory, LLMProvider, BM25Reranker
 from chalicelib.llm.reranker import RerankerInput
 from chalicelib.core.config import config
 from chalicelib.services.langsmith import log_customer_query
-from chalicelib.prompts import PERSONA
+from chalicelib.prompts import get_persona
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -71,6 +71,11 @@ class Chat:
             for msg in chat_history
         ]
 
+        # Pull the active persona from LangSmith Hub (cached, falls back to
+        # the baked-in constant on Hub failure). Tag the version onto the
+        # trace so every LangSmith run records which prompt produced it.
+        persona_text, persona_version = get_persona()
+
         try:
             # Add session metadata to the current trace
             run_id = None
@@ -88,6 +93,7 @@ class Chat:
                             "request_id": request_id,
                             "query_length": len(query),
                             "chat_history_length": len(chat_history),
+                            "persona_version": persona_version,
                         }
                     )
             except Exception as meta_error:
@@ -181,6 +187,7 @@ class Chat:
                 search_result_context=search_result_context,
                 query=query,
                 rewritten_query=rewritten_prompt,
+                persona_text=persona_text,
             )
 
             emit_status(STATUS_WRITING)
@@ -339,14 +346,20 @@ class Chat:
         search_result_context: str,
         query: str,
         rewritten_query: Optional[str] = None,
+        persona_text: Optional[str] = None,
     ) -> List[ChatMessage]:
+        # Fallback if caller didn't pre-fetch (e.g., older tests). The
+        # production path always passes the Hub-loaded persona in.
+        if persona_text is None:
+            persona_text, _ = get_persona()
+
         # Ensure we always have the system persona message at the beginning
         if (
             not chat_history
             or chat_history[0].role != "system"
-            or PERSONA not in chat_history[0].content
+            or persona_text not in chat_history[0].content
         ):
-            chat_history = [ChatMessage(role="system", content=PERSONA)]
+            chat_history = [ChatMessage(role="system", content=persona_text)]
 
         if len(chat_history) > 8:
             chat_history = [chat_history[0]] + chat_history[-7:]

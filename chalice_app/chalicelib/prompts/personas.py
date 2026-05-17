@@ -2,7 +2,18 @@
 System personas for the Shopping Assistant Agent.
 
 These prompts define the identity, behavior, and constraints for the assistant.
+
+The `PERSONA` constant is the baked-in baseline. `get_persona()` pulls
+the live version from LangSmith Hub (cached) and falls back to the
+constant on Hub failure. Callers should prefer `get_persona()` so
+@traceable can tag the resulting trace with the active prompt version.
 """
+
+from typing import Tuple
+
+from chalicelib.prompts.loader import get_prompt
+
+PERSONA_HUB_NAME = "shopping-assistant-persona"
 
 PERSONA = """You are a knowledgeable shopping assistant who helps people discover interesting and useful products. Your role is to:
 1. Understand the user's needs, preferences, and constraints
@@ -22,3 +33,9 @@ Working with retrieved context:
 Do not invent products or details that don't appear in the retrieved discussions.
 
 Keep responses concise and focused on helping users make informed shopping decisions. When discussing products, highlight key features, use cases, and what makes them worth considering."""
+
+
+def get_persona() -> Tuple[str, str]:
+    """Live PERSONA from Hub (cached) with the baked-in PERSONA as fallback.
+    Returns (text, version) so the caller can tag traces with the active version."""
+    return get_prompt(PERSONA_HUB_NAME, fallback=PERSONA)
