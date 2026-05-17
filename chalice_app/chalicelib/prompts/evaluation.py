@@ -5,7 +5,32 @@ These prompts are used to evaluate:
 1. Faithfulness: Whether responses are grounded in provided context
 2. Actionability: How actionable and specific recommendations are
 3. Retrieval Relevance: How relevant retrieved documents are to the query
+
+Each constant is the baked-in fallback. Prefer the matching `get_*()`
+function so the active version comes from LangSmith Hub and the
+@traceable run records which prompt version produced it.
 """
+
+from typing import Tuple
+
+from chalicelib.prompts.loader import get_prompt
+
+FAITHFULNESS_SYSTEM_PROMPT_HUB = "shopping-assistant-eval-faithfulness-system"
+FAITHFULNESS_USER_PROMPT_HUB = "shopping-assistant-eval-faithfulness-user"
+ACTIONABILITY_SYSTEM_PROMPT_HUB = "shopping-assistant-eval-actionability-system"
+ACTIONABILITY_USER_PROMPT_HUB = "shopping-assistant-eval-actionability-user"
+RETRIEVAL_RELEVANCE_SYSTEM_PROMPT_HUB = (
+    "shopping-assistant-eval-retrieval-relevance-system"
+)
+RETRIEVAL_RELEVANCE_USER_PROMPT_HUB = "shopping-assistant-eval-retrieval-relevance-user"
+
+
+def _escape_braces(s: str) -> str:
+    """Hub-stored eval system prompts have JSON-example braces escaped so
+    `str.format` renders the example as literal JSON. The fallback uses the
+    same escape so behavior is identical whether Hub or fallback wins."""
+    return s.replace("{", "{{").replace("}", "}}")
+
 
 # --- Faithfulness Evaluation ---
 
@@ -81,3 +106,45 @@ Retrieved Reddit Documents:
 {docs}
 
 Evaluate relevance:"""
+
+
+def get_faithfulness_system() -> Tuple[str, str]:
+    """No placeholders. Call `.format()` to unescape JSON braces."""
+    return get_prompt(
+        FAITHFULNESS_SYSTEM_PROMPT_HUB,
+        fallback=_escape_braces(FAITHFULNESS_SYSTEM_PROMPT),
+    )
+
+
+def get_faithfulness_user() -> Tuple[str, str]:
+    """Call `.format(query=..., context=..., response=...)`."""
+    return get_prompt(FAITHFULNESS_USER_PROMPT_HUB, fallback=FAITHFULNESS_USER_PROMPT)
+
+
+def get_actionability_system() -> Tuple[str, str]:
+    """No placeholders. Call `.format()` to unescape JSON braces."""
+    return get_prompt(
+        ACTIONABILITY_SYSTEM_PROMPT_HUB,
+        fallback=_escape_braces(ACTIONABILITY_SYSTEM_PROMPT),
+    )
+
+
+def get_actionability_user() -> Tuple[str, str]:
+    """Call `.format(query=..., response=...)`."""
+    return get_prompt(ACTIONABILITY_USER_PROMPT_HUB, fallback=ACTIONABILITY_USER_PROMPT)
+
+
+def get_retrieval_relevance_system() -> Tuple[str, str]:
+    """No placeholders. Call `.format()` to unescape JSON braces."""
+    return get_prompt(
+        RETRIEVAL_RELEVANCE_SYSTEM_PROMPT_HUB,
+        fallback=_escape_braces(RETRIEVAL_RELEVANCE_SYSTEM_PROMPT),
+    )
+
+
+def get_retrieval_relevance_user() -> Tuple[str, str]:
+    """Call `.format(query=..., docs=...)`."""
+    return get_prompt(
+        RETRIEVAL_RELEVANCE_USER_PROMPT_HUB,
+        fallback=RETRIEVAL_RELEVANCE_USER_PROMPT,
+    )

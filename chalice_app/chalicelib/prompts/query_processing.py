@@ -5,7 +5,20 @@ Both prompts share the same CONTINUATION vs TOPIC SHIFT decision so they
 react identically to a topic change. Without parallel handling, the
 rewrite can correctly drop prior context while HyDE still embeds it,
 re-introducing the dropped context into the search pool.
+
+Each constant is the baked-in fallback. Prefer the matching `get_*()`
+function so the active version comes from LangSmith Hub and the
+@traceable run records which prompt version produced it.
 """
+
+from typing import Tuple
+
+from chalicelib.prompts.loader import get_prompt
+
+CONTEXT_AWARE_PROMPT_REWRITING_HUB = "shopping-assistant-rewrite-system"
+PROMPT_REWRITE_INSTRUCTION_HUB = "shopping-assistant-rewrite-user"
+HYDE_SYSTEM_PROMPT_HUB = "shopping-assistant-hyde-system"
+HYDE_GENERATION_PROMPT_HUB = "shopping-assistant-hyde-user"
 
 CONTEXT_AWARE_PROMPT_REWRITING = """
 You rewrite the user's latest message into a self-contained search query for a Reddit-style corpus.
@@ -111,3 +124,36 @@ markdown — just the keywords.
 # Empty by design: format spec is now folded into HYDE_GENERATION_PROMPT.
 # Kept so client.py imports stay stable.
 HYDE_USER_INSTRUCTION_SUFFIX = ""
+
+
+def get_context_aware_rewrite() -> Tuple[str, str]:
+    """Rewrite system prompt. No placeholders; call `.format()` to no-op."""
+    return get_prompt(
+        CONTEXT_AWARE_PROMPT_REWRITING_HUB,
+        fallback=CONTEXT_AWARE_PROMPT_REWRITING,
+    )
+
+
+def get_rewrite_user_instruction() -> Tuple[str, str]:
+    """Rewrite user prompt. Call `.format(query=...)`.
+
+    The JSON-suffix braces are escaped (`{{`/`}}`) on Hub so `str.format`
+    renders the literal JSON example in the output rather than treating
+    it as another template variable. The fallback is the same escape so
+    behavior is identical whether Hub or fallback wins.
+    """
+    fallback = PROMPT_REWRITE_INSTRUCTION + REWRITE_JSON_SUFFIX.replace(
+        "{", "{{"
+    ).replace("}", "}}")
+    return get_prompt(PROMPT_REWRITE_INSTRUCTION_HUB, fallback=fallback)
+
+
+def get_hyde_system() -> Tuple[str, str]:
+    """HyDE system prompt. No placeholders; call `.format()` to no-op."""
+    return get_prompt(HYDE_SYSTEM_PROMPT_HUB, fallback=HYDE_SYSTEM_PROMPT)
+
+
+def get_hyde_user() -> Tuple[str, str]:
+    """HyDE user prompt. Call `.format(query=...)`."""
+    fallback = HYDE_GENERATION_PROMPT + HYDE_USER_INSTRUCTION_SUFFIX
+    return get_prompt(HYDE_GENERATION_PROMPT_HUB, fallback=fallback)

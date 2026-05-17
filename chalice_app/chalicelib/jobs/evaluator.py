@@ -12,12 +12,12 @@ from chalicelib.llm import LLMFactory, LLMProvider
 from chalicelib.models.data_objects import ChatMessage, EvaluationMessage
 from chalicelib.llm.metrics import RetrievalMetrics, RetrievalMetricsResult
 from chalicelib.prompts import (
-    FAITHFULNESS_SYSTEM_PROMPT,
-    FAITHFULNESS_USER_PROMPT,
-    ACTIONABILITY_SYSTEM_PROMPT,
-    ACTIONABILITY_USER_PROMPT,
-    RETRIEVAL_RELEVANCE_SYSTEM_PROMPT,
-    RETRIEVAL_RELEVANCE_USER_PROMPT,
+    get_actionability_system,
+    get_actionability_user,
+    get_faithfulness_system,
+    get_faithfulness_user,
+    get_retrieval_relevance_system,
+    get_retrieval_relevance_user,
 )
 
 
@@ -466,11 +466,14 @@ def evaluate_faithfulness(
 
     context_preview = context[:2000] if len(context) > 2000 else context
 
+    sys_text, _ = get_faithfulness_system()
+    user_template, _ = get_faithfulness_user()
+
     messages = [
-        ChatMessage(role="system", content=FAITHFULNESS_SYSTEM_PROMPT),
+        ChatMessage(role="system", content=sys_text.format()),
         ChatMessage(
             role="user",
-            content=FAITHFULNESS_USER_PROMPT.format(
+            content=user_template.format(
                 query=query,
                 context=context_preview,
                 response=response,
@@ -499,11 +502,14 @@ def evaluate_faithfulness(
 def evaluate_actionability_llm(query: str, response: str) -> ActionabilityResult:
     """Core Metric #2: Rate how actionable and specific the recommendations are."""
 
+    sys_text, _ = get_actionability_system()
+    user_template, _ = get_actionability_user()
+
     messages = [
-        ChatMessage(role="system", content=ACTIONABILITY_SYSTEM_PROMPT),
+        ChatMessage(role="system", content=sys_text.format()),
         ChatMessage(
             role="user",
-            content=ACTIONABILITY_USER_PROMPT.format(query=query, response=response),
+            content=user_template.format(query=query, response=response),
         ),
     ]
 
@@ -542,11 +548,14 @@ def evaluate_retrieval_relevance(
         ]
     )
 
+    sys_text, _ = get_retrieval_relevance_system()
+    user_template, _ = get_retrieval_relevance_user()
+
     messages = [
-        ChatMessage(role="system", content=RETRIEVAL_RELEVANCE_SYSTEM_PROMPT),
+        ChatMessage(role="system", content=sys_text.format()),
         ChatMessage(
             role="user",
-            content=RETRIEVAL_RELEVANCE_USER_PROMPT.format(query=query, docs=docs_text),
+            content=user_template.format(query=query, docs=docs_text),
         ),
     ]
 
