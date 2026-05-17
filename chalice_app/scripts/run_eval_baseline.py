@@ -163,12 +163,14 @@ def _collect_scores(rows: List[dict], window_start: datetime) -> List[dict]:
     # feedback to land. Evaluator runs on SQS lag (~5-15 s after chat ends).
     session_to_runid: dict = {}
     for attempt in range(FEEDBACK_POLL_ATTEMPTS):
+        # LangSmith caps per-page limit at 100; SDK auto-paginates the
+        # iterator so list() collects everything matching the filters.
         runs = list(
             c.list_runs(
                 project_name=LANGSMITH_PROJECT,
                 start_time=window_start,
                 run_type="chain",
-                limit=500,
+                limit=100,
             )
         )
         for r in runs:
