@@ -17,12 +17,10 @@ from chalicelib.prompts.loader import PROMPT_FALLBACK_VERSION, get_prompt
 
 @pytest.fixture(autouse=True)
 def reset_loader_state():
-    """Each test starts with an empty cache + no cached client."""
+    """Each test starts with an empty cache."""
     loader._cache.clear()
-    loader._client = None
     yield
     loader._cache.clear()
-    loader._client = None
 
 
 def _fake_template(text: str) -> MagicMock:
@@ -44,7 +42,7 @@ def test_returns_hub_text_and_commit_hash():
     client.pull_prompt.return_value = _fake_template("hub text")
     client.pull_prompt_commit.return_value = _fake_commit("a" * 40)
 
-    with patch.object(loader, "_get_client", return_value=client):
+    with patch.object(loader, "_client", client):
         text, version = get_prompt("any", fallback="baked")
 
     assert text == "hub text"
@@ -56,7 +54,7 @@ def test_falls_back_when_pull_fails():
     client = MagicMock()
     client.pull_prompt.side_effect = RuntimeError("network down")
 
-    with patch.object(loader, "_get_client", return_value=client):
+    with patch.object(loader, "_client", client):
         text, version = get_prompt("any", fallback="baked")
 
     assert text == "baked"
@@ -68,7 +66,7 @@ def test_cache_hit_skips_hub_on_second_call():
     client.pull_prompt.return_value = _fake_template("hub text")
     client.pull_prompt_commit.return_value = _fake_commit("b" * 40)
 
-    with patch.object(loader, "_get_client", return_value=client):
+    with patch.object(loader, "_client", client):
         get_prompt("any", fallback="baked")
         get_prompt("any", fallback="baked")
 
@@ -81,7 +79,7 @@ def test_cache_expires_after_ttl():
     client.pull_prompt.return_value = _fake_template("hub text")
     client.pull_prompt_commit.return_value = _fake_commit("c" * 40)
 
-    with patch.object(loader, "_get_client", return_value=client):
+    with patch.object(loader, "_client", client):
         get_prompt("any", fallback="baked")
         # Manually expire the cache entry.
         cached = loader._cache["any"]
@@ -100,7 +98,7 @@ def test_failed_pull_does_not_poison_cache():
     ]
     client.pull_prompt_commit.return_value = _fake_commit("d" * 40)
 
-    with patch.object(loader, "_get_client", return_value=client):
+    with patch.object(loader, "_client", client):
         first_text, first_version = get_prompt("any", fallback="baked")
         second_text, second_version = get_prompt("any", fallback="baked")
 
@@ -117,7 +115,7 @@ def test_different_prompt_names_cached_separately():
     )
     client.pull_prompt_commit.side_effect = lambda name: _fake_commit(name * 40)
 
-    with patch.object(loader, "_get_client", return_value=client):
+    with patch.object(loader, "_client", client):
         text_a, _ = get_prompt("a", fallback="fa")
         text_b, _ = get_prompt("b", fallback="fb")
         # Second pull of "a" should hit cache.
