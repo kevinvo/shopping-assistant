@@ -85,9 +85,14 @@ class Chat:
                     run_id = str(current_run.id)
                     logger.info(f"Captured run_id: {run_id}")
 
-                    # RunTree object doesn't have a 'run' attribute - use the object directly
-                    current_run.update(
-                        metadata={
+                    # langsmith.RunTree exposes add_metadata; the
+                    # previous code called .update(metadata=...) which
+                    # silently raised AttributeError and got swallowed
+                    # by the warning logger -- so no run has had
+                    # session/request metadata since the SDK upgrade
+                    # that removed .update().
+                    current_run.add_metadata(
+                        {
                             "session_id": session_id,
                             "socket_id": socket_id,
                             "request_id": request_id,
