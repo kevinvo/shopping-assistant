@@ -20,11 +20,14 @@ from chalicelib.prompts import PERSONA
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-# Set LangSmith environment variables
+# Set LangSmith environment variables. LANGCHAIN_PROJECT comes from the
+# Chalice stage config so chalice-test and chalice-prod land in separate
+# LangSmith projects (`shopping-assistant-test` vs `shopping-assistant-prod`).
+# Setdefault means a local dev run can still override via shell env.
 os.environ["LANGSMITH_API_KEY"] = config.langsmith_api_key
 os.environ["LANGSMITH_API_URL"] = config.langsmith_api_url
 os.environ["LANGCHAIN_TRACING_V2"] = "true"
-os.environ["LANGCHAIN_PROJECT"] = "pr-respectful-icicle-91"
+os.environ.setdefault("LANGCHAIN_PROJECT", "shopping-assistant-test")
 
 
 # User-facing progress text rendered as a Perplexity-style trace above the
