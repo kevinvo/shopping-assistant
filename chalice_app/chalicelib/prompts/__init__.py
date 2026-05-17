@@ -18,6 +18,10 @@ from chalicelib.prompts.query_processing import (
     HYDE_SYSTEM_PROMPT,
     REWRITE_JSON_SUFFIX,
     HYDE_USER_INSTRUCTION_SUFFIX,
+    get_context_aware_rewrite,
+    get_rewrite_user_instruction,
+    get_hyde_system,
+    get_hyde_user,
 )
 from chalicelib.prompts.evaluation import (
     FAITHFULNESS_SYSTEM_PROMPT,
@@ -26,6 +30,12 @@ from chalicelib.prompts.evaluation import (
     ACTIONABILITY_USER_PROMPT,
     RETRIEVAL_RELEVANCE_SYSTEM_PROMPT,
     RETRIEVAL_RELEVANCE_USER_PROMPT,
+    get_faithfulness_system,
+    get_faithfulness_user,
+    get_actionability_system,
+    get_actionability_user,
+    get_retrieval_relevance_system,
+    get_retrieval_relevance_user,
 )
 from chalicelib.prompts.suggested_prompts import (
     SUGGESTED_PROMPTS_SYSTEM_PROMPT,
@@ -43,6 +53,10 @@ __all__ = [
     "HYDE_SYSTEM_PROMPT",
     "REWRITE_JSON_SUFFIX",
     "HYDE_USER_INSTRUCTION_SUFFIX",
+    "get_context_aware_rewrite",
+    "get_rewrite_user_instruction",
+    "get_hyde_system",
+    "get_hyde_user",
     # Evaluation
     "FAITHFULNESS_SYSTEM_PROMPT",
     "FAITHFULNESS_USER_PROMPT",
@@ -50,6 +64,12 @@ __all__ = [
     "ACTIONABILITY_USER_PROMPT",
     "RETRIEVAL_RELEVANCE_SYSTEM_PROMPT",
     "RETRIEVAL_RELEVANCE_USER_PROMPT",
+    "get_faithfulness_system",
+    "get_faithfulness_user",
+    "get_actionability_system",
+    "get_actionability_user",
+    "get_retrieval_relevance_system",
+    "get_retrieval_relevance_user",
     # Suggested prompts (empty-state)
     "SUGGESTED_PROMPTS_SYSTEM_PROMPT",
     "SUGGESTED_PROMPTS_USER_PROMPT",

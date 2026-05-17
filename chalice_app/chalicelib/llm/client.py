@@ -8,14 +8,12 @@ from chalicelib.core.config import config as app_config
 from chalicelib.core.performance_timer import measure_execution_time
 from chalicelib.models.data_objects import ChatMessage
 from chalicelib.prompts import (
-    CONTEXT_AWARE_PROMPT_REWRITING,
-    PROMPT_REWRITE_INSTRUCTION,
-    HYDE_GENERATION_PROMPT,
-    HYDE_SYSTEM_PROMPT,
-    REWRITE_JSON_SUFFIX,
-    HYDE_USER_INSTRUCTION_SUFFIX,
+    get_context_aware_rewrite,
+    get_hyde_system,
+    get_hyde_user,
+    get_rewrite_user_instruction,
 )
-from langsmith import traceable
+from langsmith import traceable, get_current_run_tree
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
 from dataclasses import dataclass
@@ -27,6 +25,22 @@ logger.setLevel(logging.INFO)
 
 
 _models_rebuilt = False
+
+
+def _tag_run(**metadata) -> None:
+    """Attach metadata to the current LangSmith run if one is active.
+
+    No-op outside a @traceable context (tests, scripts). Caught errors
+    are warned-and-swallowed -- this is best-effort observability, not
+    load-bearing.
+    """
+    try:
+        run = get_current_run_tree()
+        if run is not None:
+            run.add_metadata(metadata)
+    except Exception as e:  # pragma: no cover - logging only
+        logger.warning("Failed to tag run metadata: %s", e)
+
 
 # Tail of conversation history fed into rewrite/HyDE. Past this window the
 # established topic dominates the few-shot examples and small-model
@@ -175,13 +189,14 @@ class BaseLLM(ABC):
         Resolves pronouns / topic-elision against the recent history. JSON
         mode so we can keep max_tokens tight.
         """
+        sys_text, sys_version = get_context_aware_rewrite()
+        user_template, user_version = get_rewrite_user_instruction()
+        _tag_run(rewrite_system_version=sys_version, rewrite_user_version=user_version)
+
         messages = self._build_chat_messages(
             message_history[-_REWRITE_HISTORY_TAIL:],
-            system_prompt=CONTEXT_AWARE_PROMPT_REWRITING,
-            user_prompt=(
-                PROMPT_REWRITE_INSTRUCTION.format(query=last_message_content)
-                + REWRITE_JSON_SUFFIX
-            ),
+            system_prompt=sys_text.format(),
+            user_prompt=user_template.format(query=last_message_content),
         )
         response = self.chat(
             messages=messages,
@@ -210,13 +225,14 @@ class BaseLLM(ABC):
         query a second time and burning ~1.3 s of Qdrant round-trip on
         results we'd just dedupe away in _combine_search_results.
         """
+        sys_text, sys_version = get_hyde_system()
+        user_template, user_version = get_hyde_user()
+        _tag_run(hyde_system_version=sys_version, hyde_user_version=user_version)
+
         messages = self._build_chat_messages(
             message_history[-_HYDE_HISTORY_TAIL:],
-            system_prompt=HYDE_SYSTEM_PROMPT,
-            user_prompt=(
-                HYDE_GENERATION_PROMPT.format(query=last_message_content)
-                + HYDE_USER_INSTRUCTION_SUFFIX
-            ),
+            system_prompt=sys_text.format(),
+            user_prompt=user_template.format(query=last_message_content),
         )
         response = self.chat(
             messages=messages,
