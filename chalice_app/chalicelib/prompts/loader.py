@@ -47,20 +47,14 @@ class _CachedPrompt:
 
 _cache: dict[str, _CachedPrompt] = {}
 _cache_lock = threading.Lock()
-_client: Client | None = None
-_client_lock = threading.Lock()
 
-
-def _get_client() -> Client:
-    global _client
-    if _client is None:
-        with _client_lock:
-            if _client is None:
-                _client = Client(
-                    api_key=config.langsmith_api_key,
-                    api_url=config.langsmith_api_url,
-                )
-    return _client
+# Module-level eager init matches the convention in
+# chalicelib/services/langsmith.py. Client construction is just field
+# assignment (no network); safe at import time once config is loaded.
+_client = Client(
+    api_key=config.langsmith_api_key,
+    api_url=config.langsmith_api_url,
+)
 
 
 def _extract_text(template) -> str:
@@ -91,10 +85,9 @@ def get_prompt(hub_name: str, fallback: str) -> Tuple[str, str]:
         return cached.text, cached.version
 
     try:
-        client = _get_client()
-        template = client.pull_prompt(hub_name, include_model=False)
+        template = _client.pull_prompt(hub_name, include_model=False)
         text = _extract_text(template)
-        commit = client.pull_prompt_commit(hub_name)
+        commit = _client.pull_prompt_commit(hub_name)
         version = commit.commit_hash[:12]
     except Exception as e:
         logger.warning(
