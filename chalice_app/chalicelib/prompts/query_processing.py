@@ -1,14 +1,10 @@
 """
 Query processing prompts for context-aware rewriting and HyDE generation.
 
-These prompts are used to:
-1. Rewrite user queries with conversation context awareness
-2. Generate hypothetical document embeddings (HyDE) for improved search
-
 Both prompts share the same CONTINUATION vs TOPIC SHIFT decision so they
 react identically to a topic change. Without parallel handling, the
-rewrite can correctly drop prior context while HyDE still embeds it —
-poisoning ~1/3 of the search pool with off-topic results.
+rewrite can correctly drop prior context while HyDE still embeds it,
+re-introducing the dropped context into the search pool.
 """
 
 CONTEXT_AWARE_PROMPT_REWRITING = """

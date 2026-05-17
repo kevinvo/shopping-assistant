@@ -22,8 +22,8 @@ from chalicelib.llm import LLMFactory, LLMProvider
 from chalicelib.models.data_objects import ChatMessage
 
 # Keywords that should NEVER appear in the Turn 3 HyDE for "tell me about
-# backpacks". These are the exact tokens captured from prod CloudWatch on
-# 2026-05-16 that proved gift-context bleed.
+# backpacks" — the exact tokens that proved gift-context bleed in the
+# original production regression.
 GIFT_BLEED_KEYWORDS = (
     "jewelry",
     "keepsake",

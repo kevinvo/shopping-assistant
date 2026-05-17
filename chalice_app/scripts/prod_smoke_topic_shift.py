@@ -33,6 +33,8 @@ from typing import List, Tuple
 import boto3
 import websockets
 
+from scripts.check_topic_shift import GIFT_BLEED_KEYWORDS
+
 # The "chalice-prod" stage exists in .chalice/config.json but its
 # WebSocket isn't deployed (WEBSOCKET_DOMAIN still INJECTED_BY_DEPLOY on
 # the prod Lambda), so the user-facing deployment is `chalice-test`.
@@ -66,18 +68,7 @@ CASES: List[Case] = [
             "What about birthday cards?",
         ],
         shift="tell me about backpacks",
-        bleed=(
-            "jewelry",
-            "keepsake",
-            "spa",
-            "candle",
-            "perfume",
-            "chocolate",
-            "flowers",
-            "gift box",
-            "engraved",
-            "sentimental",
-        ),
+        bleed=GIFT_BLEED_KEYWORDS,
         on_topic=("backpack",),
     ),
     Case(
@@ -234,7 +225,6 @@ CASES: List[Case] = [
 @dataclass
 class CaseResult:
     case: Case
-    shift_message_id: str
     shift_start_ms: int
     response_preview: str = ""
     rewrite_line: str = ""
@@ -324,7 +314,6 @@ async def _run_case(case: Case, ws_url_base: str) -> CaseResult:
     except Exception as e:
         return CaseResult(
             case=case,
-            shift_message_id=shift_message_id,
             shift_start_ms=shift_start_ms,
             error=f"WebSocket error: {e}",
         )
@@ -345,9 +334,14 @@ async def _run_case(case: Case, ws_url_base: str) -> CaseResult:
 def _poll_log_line(logs_client, start_ms: int, filter_pattern: str) -> str:
     """Poll CloudWatch for the most recent line matching filter_pattern
     in the window starting at start_ms. Returns the message text or a
-    placeholder if nothing landed in the poll window."""
-    for _ in range(LOG_POLL_ATTEMPTS):
-        time.sleep(LOG_POLL_INTERVAL_SECONDS)
+    placeholder if nothing landed in the poll window.
+
+    Lambda streaming already drained the response by the time we get here,
+    so logs are usually ingested within a second; try once eagerly before
+    backing off."""
+    for attempt in range(LOG_POLL_ATTEMPTS):
+        if attempt > 0:
+            time.sleep(LOG_POLL_INTERVAL_SECONDS)
         try:
             resp = logs_client.filter_log_events(
                 logGroupName=LOG_GROUP,
