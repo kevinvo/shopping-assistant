@@ -340,6 +340,10 @@ class ResponsePayload:
     timestamp: str
     messageId: Optional[str] = None
     conversationId: Optional[str] = None
+    # LangSmith run id for this answer. Carried on the terminal message so the
+    # frontend can attach human thumbs feedback to the same run the async
+    # evaluator scores. Only set on message_end; omitted from other events.
+    run_id: Optional[str] = None
 
     @classmethod
     def from_dict(cls, data: dict) -> "ResponsePayload":
@@ -351,6 +355,7 @@ class ResponsePayload:
             timestamp=data.get("timestamp", ""),
             messageId=data.get("messageId"),
             conversationId=data.get("conversationId"),
+            run_id=data.get("run_id"),
         )
 
     def to_dict(self) -> dict:
@@ -360,6 +365,8 @@ class ResponsePayload:
             result.pop("messageId", None)
         if result.get("conversationId") is None:
             result.pop("conversationId", None)
+        if result.get("run_id") is None:
+            result.pop("run_id", None)
         return result
 
     def to_json(self) -> str:
@@ -461,6 +468,7 @@ class ResponsePayload:
         request_id: str,
         messageId: str,
         conversationId: Optional[str] = None,
+        run_id: Optional[str] = None,
     ) -> "ResponsePayload":
         return cls(
             type=MessageType.MESSAGE_END,
@@ -469,4 +477,5 @@ class ResponsePayload:
             timestamp=datetime.now().isoformat(),
             messageId=messageId,
             conversationId=conversationId,
+            run_id=run_id,
         )

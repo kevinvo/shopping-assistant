@@ -502,6 +502,7 @@ def process_message(message_payload: MessagePayload) -> None:
                         request_id=request_id,
                         messageId=messageId,
                         conversationId=conversation_id,
+                        run_id=(eval_metadata or {}).get("run_id"),
                     ),
                 ),
                 context="streaming complete",
