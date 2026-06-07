@@ -162,7 +162,7 @@ def register_rest_routes(app):
                 },
             )
 
-    @app.route("/feedback", methods=["POST"], cors=cors_config)
+    @app.route("/feedback", methods=["POST"], cors=public_cors_config)
     @notify_on_exception
     def submit_feedback():
         """Attach a human thumbs rating to a chat answer's LangSmith run.
@@ -170,6 +170,11 @@ def register_rest_routes(app):
         Body: {"run_id": "<uuid>", "score": 1|0}. Validation lives in the
         service; invalid input → 400, LangSmith failure → 502. The LangSmith
         API key never leaves the server.
+
+        Uses the wildcard public CORS config (no cookies/credentials are
+        involved) so the deployed frontend — not just localhost — can post.
+        Chalice injects Access-Control-Allow-Origin: * from that config, the
+        same way the /suggested-prompts endpoint serves every origin.
         """
 
         from chalicelib.services.feedback import (
@@ -177,13 +182,7 @@ def register_rest_routes(app):
             submit_human_feedback,
         )
 
-        origin = app.current_request.headers.get("origin", "http://localhost:3000")
-        cors_headers = {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": origin,
-            "Access-Control-Allow-Credentials": "true",
-        }
-
+        json_headers = {"Content-Type": "application/json"}
         body = app.current_request.json_body or {}
 
         try:
@@ -193,17 +192,17 @@ def register_rest_routes(app):
             return Response(
                 body={"error": "invalid feedback", "details": str(exc)},
                 status_code=400,
-                headers=cors_headers,
+                headers=json_headers,
             )
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("Failed to post feedback: %s", exc, exc_info=True)
             return Response(
                 body={"error": "failed to record feedback"},
                 status_code=502,
-                headers=cors_headers,
+                headers=json_headers,
             )
 
-        return Response(body={"status": "ok"}, status_code=200, headers=cors_headers)
+        return Response(body={"status": "ok"}, status_code=200, headers=json_headers)
 
     @app.route("/health", methods=["GET"])
     def health_check():
