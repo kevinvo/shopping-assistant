@@ -46,6 +46,16 @@ SSM_ENV_VAR_MAPPING: Dict[str, str] = {
     "athena-output-bucket": "ATHENA_OUTPUT_BUCKET",
 }
 
+# Single source of truth for SQS-consumer Lambda handlers: maps handler name →
+# (queue-url env var, batch size). Post-deploy validation keeps each handler's
+# event-source mapping Enabled — the evaluator regressed silently once (its
+# mapping was disabled during a test session and never re-enabled), so every
+# consumer is guarded, not just chat_processor.
+SQS_CONSUMER_FUNCTIONS: Dict[str, tuple] = {
+    "chat_processor": ("CHAT_PROCESSING_QUEUE_URL", 1),
+    "evaluator": ("EVALUATION_QUEUE_URL", 10),
+}
+
 
 def log(level: str, message: str) -> None:
     print(f"[{level}] {message}")
@@ -301,14 +311,9 @@ def list_event_mappings(
     client = boto3.client("lambda", region_name=region)
     entries: List[EventMapping] = []
 
-    sqs_functions = {
-        "chat_processor": ("CHAT_PROCESSING_QUEUE_URL", 1),
-        "evaluator": ("EVALUATION_QUEUE_URL", 10),
-    }
-
     sqs_client = boto3.client("sqs", region_name=region)
 
-    for handler, (env_key, batch_size) in sqs_functions.items():
+    for handler, (env_key, batch_size) in SQS_CONSUMER_FUNCTIONS.items():
         queue_url = env_vars.get(env_key)
         if not queue_url:
             continue
@@ -640,20 +645,17 @@ def attach_and_verify_layer(
     raise DeployError("Failed to attach layer after retries")
 
 
-def ensure_post_deploy(
-    stage: str,
-    env_vars: Dict[str, str],
-    region: str,
-    max_visible: int,
-    max_inflight: int,
-    max_retries: int = 3,
-    retry_delay: int = 10,
+def ensure_mapping_enabled(
+    lambda_client,
+    function_name: str,
+    max_polls: int = 12,
+    poll_delay: int = 5,
 ) -> None:
-    lambda_client = boto3.client("lambda", region_name=region)
-    sqs_client = boto3.client("sqs", region_name=region)
+    """Ensure the SQS event-source mapping for *function_name* is Enabled.
 
-    # Ensure chat processor mapping exists and enabled.
-    function_name = f"shopping-assistant-api-{stage}-chat_processor"
+    Re-enables a Disabled mapping and waits for it to settle. Raises DeployError
+    if the mapping is missing or ends in any non-Enabled state.
+    """
     mappings = lambda_client.list_event_source_mappings(FunctionName=function_name)
     if not mappings.get("EventSourceMappings"):
         raise DeployError(f"No event-source mapping found for {function_name}")
@@ -668,11 +670,11 @@ def ensure_post_deploy(
         mapping_uuid = mapping_entry["UUID"]
         lambda_client.update_event_source_mapping(UUID=mapping_uuid, Enabled=True)
         # Wait for the mapping to reach Enabled state
-        for _ in range(12):
-            time.sleep(5)
+        for _ in range(max_polls):
+            time.sleep(poll_delay)
             check = lambda_client.list_event_source_mappings(FunctionName=function_name)
             state = check["EventSourceMappings"][0].get("State", "")
-            log("INFO", f"Event-source mapping state: {state}")
+            log("INFO", f"Event-source mapping state ({function_name}): {state}")
             if state == "Enabled":
                 break
         else:
@@ -681,6 +683,31 @@ def ensure_post_deploy(
             )
     elif state != "Enabled":
         raise DeployError(f"Event-source mapping for {function_name} is '{state}'")
+
+
+def ensure_post_deploy(
+    stage: str,
+    env_vars: Dict[str, str],
+    region: str,
+    max_visible: int,
+    max_inflight: int,
+    max_retries: int = 3,
+    retry_delay: int = 10,
+) -> None:
+    lambda_client = boto3.client("lambda", region_name=region)
+    sqs_client = boto3.client("sqs", region_name=region)
+
+    # Ensure every configured SQS consumer mapping exists and is enabled. Skip a
+    # handler whose queue URL isn't set for this stage, mirroring
+    # list_event_mappings — otherwise a stage that doesn't run the evaluator
+    # would fail the deploy on a mapping that was never meant to exist.
+    for handler, (env_key, _batch_size) in SQS_CONSUMER_FUNCTIONS.items():
+        if not env_vars.get(env_key):
+            log("INFO", f"Skipping mapping check for {handler}: {env_key} not set")
+            continue
+        ensure_mapping_enabled(
+            lambda_client, f"shopping-assistant-api-{stage}-{handler}"
+        )
 
     queue_url = env_vars.get("CHAT_PROCESSING_QUEUE_URL")
     if not queue_url:
