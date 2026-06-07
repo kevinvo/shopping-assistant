@@ -162,6 +162,49 @@ def register_rest_routes(app):
                 },
             )
 
+    @app.route("/feedback", methods=["POST"], cors=cors_config)
+    @notify_on_exception
+    def submit_feedback():
+        """Attach a human thumbs rating to a chat answer's LangSmith run.
+
+        Body: {"run_id": "<uuid>", "score": 1|0}. Validation lives in the
+        service; invalid input → 400, LangSmith failure → 502. The LangSmith
+        API key never leaves the server.
+        """
+
+        from chalicelib.services.feedback import (
+            InvalidFeedback,
+            submit_human_feedback,
+        )
+
+        origin = app.current_request.headers.get("origin", "http://localhost:3000")
+        cors_headers = {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Credentials": "true",
+        }
+
+        body = app.current_request.json_body or {}
+
+        try:
+            submit_human_feedback(run_id=body.get("run_id"), score=body.get("score"))
+        except InvalidFeedback as exc:
+            logger.warning("Rejected feedback: %s", exc)
+            return Response(
+                body={"error": "invalid feedback", "details": str(exc)},
+                status_code=400,
+                headers=cors_headers,
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("Failed to post feedback: %s", exc, exc_info=True)
+            return Response(
+                body={"error": "failed to record feedback"},
+                status_code=502,
+                headers=cors_headers,
+            )
+
+        return Response(body={"status": "ok"}, status_code=200, headers=cors_headers)
+
     @app.route("/health", methods=["GET"])
     def health_check():
         """Health check endpoint."""
