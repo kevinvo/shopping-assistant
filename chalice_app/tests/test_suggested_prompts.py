@@ -43,11 +43,19 @@ def test_collect_grounding_is_empty_when_all_blank():
 
 def test_build_llm_prompt_embeds_subreddits_with_r_prefix():
     signal = sp.GroundingSignal(subreddits=["BuyItForLife", "headphones"])
-    prompt = sp.build_llm_prompt(signal, target_count=24)
+    prompt = sp.build_llm_prompt(signal, prompts_per_subreddit=2)
 
     assert "- r/BuyItForLife" in prompt
     assert "- r/headphones" in prompt
-    assert "exactly 24 starter prompts" in prompt
+    assert "exactly 2" in prompt
+
+
+def test_build_llm_prompt_defaults_to_two_per_subreddit():
+    signal = sp.GroundingSignal(subreddits=["coffee"])
+    prompt = sp.build_llm_prompt(signal)
+
+    assert sp.PROMPTS_PER_SUBREDDIT == 2
+    assert "exactly 2" in prompt
 
 
 def test_build_llm_prompt_handles_empty_signal_gracefully():
@@ -132,6 +140,55 @@ def test_parse_llm_response_raises_on_missing_prompts_key():
         sp.parse_llm_response(json.dumps({"other": []}))
 
 
+# --- per-subreddit (object) shape -----------------------------------------
+
+
+def test_parse_llm_response_per_subreddit_caps_at_two():
+    raw = json.dumps(
+        {
+            "r/coffee": [
+                "Find a great pour over coffee maker",
+                "Recommend a budget espresso machine please",
+                "Compare burr grinders for home baristas",  # 3rd dropped
+            ],
+            "r/headphones": [
+                "Suggest noise cancelling headphones under budget",
+                "Find durable wired earbuds for commuting",
+            ],
+        }
+    )
+    parsed = sp.parse_llm_response(raw, prompts_per_subreddit=2)
+
+    assert len(parsed) == 4
+    assert "Compare burr grinders for home baristas" not in parsed
+
+
+def test_parse_llm_response_dedupes_across_subreddits():
+    raw = json.dumps(
+        {
+            "r/coffee": ["Find a great pour over coffee maker"],
+            "r/espresso": ["find a great pour over coffee maker"],  # dup, lowercased
+        }
+    )
+    parsed = sp.parse_llm_response(raw)
+
+    assert len(parsed) == 1
+
+
+def test_parse_llm_response_per_subreddit_filters_bad_lengths():
+    raw = json.dumps(
+        {
+            "r/coffee": ["ok", "a perfectly reasonable coffee prompt"],  # 1st too short
+            "r/diy": ["x " * 25, "find a sturdy cordless drill set"],  # 1st too long
+        }
+    )
+    parsed = sp.parse_llm_response(raw, prompts_per_subreddit=2)
+
+    assert sorted(parsed) == sorted(
+        ["a perfectly reasonable coffee prompt", "find a sturdy cordless drill set"]
+    )
+
+
 # ---------------------------------------------------------------------------
 # regenerate_prompts — end-to-end with stubbed LLM and DDB
 # ---------------------------------------------------------------------------
@@ -147,9 +204,17 @@ class _FakeLLM:
         return self.response
 
 
-def test_regenerate_prompts_persists_validated_set(monkeypatch):
+def test_regenerate_prompts_persists_two_per_subreddit(monkeypatch):
+    # Structured per-subreddit response: 2 prompts for each of 10 subreddits.
+    subs = [f"sub{i}" for i in range(10)]
     payload = json.dumps(
-        {"prompts": [f"Solid prompt number {i} for shoppers" for i in range(20)]}
+        {
+            f"r/{s}": [
+                f"Find a great {s} product for shoppers",
+                f"Recommend the best {s} pick under budget",
+            ]
+            for s in subs
+        }
     )
     fake_llm = _FakeLLM(payload)
     monkeypatch.setattr(sp.LLMFactory, "create_llm", lambda *a, **k: fake_llm)
@@ -161,12 +226,10 @@ def test_regenerate_prompts_persists_validated_set(monkeypatch):
         lambda self: saved.append(self) or self,
     )
 
-    record = sp.regenerate_prompts(subreddits=["buyitforlife", "headphones"])
+    record = sp.regenerate_prompts(subreddits=subs)
 
-    assert record.prompts[:20] == [
-        f"Solid prompt number {i} for shoppers" for i in range(20)
-    ]
-    assert record.sources_used == ["buyitforlife", "headphones"]
+    assert len(record.prompts) == 20  # 2 per subreddit x 10 subreddits
+    assert record.sources_used == subs
     assert len(saved) == 1
 
 
