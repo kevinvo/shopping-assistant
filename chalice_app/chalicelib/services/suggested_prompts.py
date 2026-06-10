@@ -1,9 +1,10 @@
 """Generate and persist starter prompts for the empty-state UI.
 
-The cron passes a list of indexed subreddit names to the LLM, asks for a
-grounded pool of starter prompts, validates the JSON response, and overwrites
-the single global SuggestedPrompts record. Stale prompts are kept on
-validation failure so the homepage never goes blank when a regen run hiccups.
+The cron passes a list of indexed subreddit names to the LLM, asks for two
+prompts grounded in each community (returned as a JSON object keyed by
+subreddit), validates and flattens the response, and overwrites the single
+global SuggestedPrompts record. Stale prompts are kept on validation failure so
+the homepage never goes blank when a regen run hiccups.
 
 The grounding signal is intentionally lightweight: just the names of the
 communities the assistant has indexed. Adding post titles or vector samples
@@ -30,7 +31,7 @@ from chalicelib.prompts import (
 logger = logging.getLogger(__name__)
 
 
-TARGET_PROMPT_COUNT = 24
+PROMPTS_PER_SUBREDDIT = 2
 MIN_ACCEPTABLE_PROMPTS = 16  # below this we keep the previous record
 
 
@@ -107,15 +108,21 @@ def collect_grounding_signal(
 
 
 def build_llm_prompt(
-    signal: GroundingSignal, *, target_count: int = TARGET_PROMPT_COUNT
+    signal: GroundingSignal,
+    *,
+    prompts_per_subreddit: int = PROMPTS_PER_SUBREDDIT,
 ) -> str:
-    """Fill the SUGGESTED_PROMPTS_USER_PROMPT template with the subreddit list."""
+    """Fill the SUGGESTED_PROMPTS_USER_PROMPT template with the subreddit list.
+
+    Asks the LLM for `prompts_per_subreddit` prompts grounded in each listed
+    community, returned as a JSON object keyed by subreddit.
+    """
     subreddit_lines = (
         "\n".join(f"- r/{name}" for name in signal.subreddits)
         or "- (no community signal available)"
     )
     return SUGGESTED_PROMPTS_USER_PROMPT.format(
-        target_count=target_count,
+        prompts_per_subreddit=prompts_per_subreddit,
         subreddit_lines=subreddit_lines,
     )
 
@@ -123,11 +130,11 @@ def build_llm_prompt(
 _JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
 
 
-def parse_llm_response(raw: str) -> List[str]:
-    """Parse the LLM output into a clean list of prompt strings.
+def _extract_json_object(raw: str) -> object:
+    """Parse a JSON value out of an LLM response.
 
-    Tolerates: bare JSON object, JSON inside ```json fenced blocks, JSON with
-    leading/trailing prose. Raises ValueError if no usable JSON is found.
+    Tolerates: bare JSON, JSON inside ```json fenced blocks, and JSON with
+    leading/trailing prose. Raises ValueError if no JSON can be parsed.
     """
     if not raw:
         raise ValueError("Empty LLM response")
@@ -144,39 +151,75 @@ def parse_llm_response(raw: str) -> List[str]:
     if first != -1 and last != -1 and last > first:
         candidates.append(raw[first : last + 1])
 
-    parsed = None
     for candidate in candidates:
         try:
-            parsed = json.loads(candidate)
-            break
+            return json.loads(candidate)
         except json.JSONDecodeError:
             continue
+    raise ValueError("Could not parse JSON from LLM response")
 
-    if parsed is None:
-        raise ValueError("Could not parse JSON from LLM response")
 
-    prompts = parsed.get("prompts") if isinstance(parsed, dict) else None
-    if not isinstance(prompts, list):
-        raise ValueError("LLM response missing 'prompts' list")
+def _normalize_prompt(entry: object) -> Optional[str]:
+    """Return a cleaned prompt string, or None if it fails validation."""
+    if not isinstance(entry, str):
+        return None
+    text = entry.strip().strip('"').strip()
+    if not text:
+        return None
+    word_count = len(text.split())
+    if word_count < 4 or word_count > 18:
+        return None
+    return text
+
+
+def parse_llm_response(
+    raw: str, *, prompts_per_subreddit: int = PROMPTS_PER_SUBREDDIT
+) -> List[str]:
+    """Parse the per-subreddit LLM output into a flat list of prompt strings.
+
+    Expects a JSON object keyed by subreddit, each mapping to a list of prompts
+    (``{"r/coffee": ["...", "..."], ...}``). Takes up to `prompts_per_subreddit`
+    valid prompts per community, dedupes case-insensitively across the whole
+    set, and flattens in the order the model returned them.
+
+    As a degraded escape hatch, a flat ``{"prompts": [...]}`` object is also
+    accepted (deduped, no per-community cap) so a malformed-but-usable response
+    still keeps the homepage populated rather than failing the run. Raises
+    ValueError if no JSON parses or nothing usable survives validation.
+    """
+    parsed = _extract_json_object(raw)
+    if not isinstance(parsed, dict):
+        raise ValueError("LLM response was not a JSON object")
+
+    legacy_flat = parsed.get("prompts")
+    if isinstance(legacy_flat, list):
+        groups = [legacy_flat]
+        per_group_cap = len(legacy_flat)
+    else:
+        groups = [value for value in parsed.values() if isinstance(value, list)]
+        per_group_cap = prompts_per_subreddit
 
     cleaned: List[str] = []
     seen = set()
-    for entry in prompts:
-        if not isinstance(entry, str):
-            continue
-        text = entry.strip().strip('"').strip()
-        if not text:
-            continue
-        word_count = len(text.split())
-        if word_count < 4 or word_count > 18:
-            continue
-        # Dedupe case-insensitively to avoid near-duplicates dominating the pool.
-        key = text.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        cleaned.append(text)
+    for group in groups:
+        taken = 0
+        for entry in group:
+            if taken >= per_group_cap:
+                break
+            text = _normalize_prompt(entry)
+            if text is None:
+                continue
+            # Dedupe case-insensitively so the same idea can't appear twice
+            # across communities.
+            key = text.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            cleaned.append(text)
+            taken += 1
 
+    if not cleaned:
+        raise ValueError("LLM response contained no usable prompts")
     return cleaned
 
 
@@ -219,7 +262,7 @@ def regenerate_prompts(
         )
 
     record = SuggestedPrompts.new(
-        prompts=prompts[:TARGET_PROMPT_COUNT],
+        prompts=prompts,
         sources_used=signal.subreddits,
     )
     record.save()
