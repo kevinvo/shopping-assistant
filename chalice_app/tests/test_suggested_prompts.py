@@ -135,9 +135,17 @@ def test_parse_llm_response_raises_on_garbage():
         sp.parse_llm_response("not json at all, sorry")
 
 
-def test_parse_llm_response_raises_on_missing_prompts_key():
+def test_parse_llm_response_raises_when_nothing_usable():
+    # An object whose lists yield no valid prompts has nothing to publish.
     with pytest.raises(ValueError):
         sp.parse_llm_response(json.dumps({"other": []}))
+
+
+def test_parse_llm_response_accepts_arbitrary_subreddit_keys():
+    # The per-subreddit shape keys on whatever the model returns, not a fixed
+    # "prompts" key.
+    raw = json.dumps({"r/anything": ["find a great product for shoppers"]})
+    assert sp.parse_llm_response(raw) == ["find a great product for shoppers"]
 
 
 # --- per-subreddit (object) shape -----------------------------------------
