@@ -32,7 +32,9 @@ logger = logging.getLogger(__name__)
 
 
 PROMPTS_PER_SUBREDDIT = 2
-MIN_ACCEPTABLE_PROMPTS = 16  # below this we keep the previous record
+# Absolute "don't crash" floor, intentionally well below the per-subreddit
+# target (~2 x len(INDEXED_SUBREDDITS)): below this we keep the previous record.
+MIN_ACCEPTABLE_PROMPTS = 16
 
 
 # Subreddits the indexer has data for. Update this when you add or remove
@@ -194,7 +196,7 @@ def parse_llm_response(
     legacy_flat = parsed.get("prompts")
     if isinstance(legacy_flat, list):
         groups = [legacy_flat]
-        per_group_cap = len(legacy_flat)
+        per_group_cap = float("inf")  # flat escape hatch: take all, no cap
     else:
         groups = [value for value in parsed.values() if isinstance(value, list)]
         per_group_cap = prompts_per_subreddit
@@ -271,6 +273,7 @@ def regenerate_prompts(
         extra={
             "count": len(record.prompts),
             "source_count": len(record.sources_used),
+            "expected": PROMPTS_PER_SUBREDDIT * len(signal.subreddits),
         },
     )
     return record
