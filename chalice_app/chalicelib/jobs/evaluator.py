@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any, List, Optional
 
@@ -110,13 +111,37 @@ class ScoresForComputation:
     retrieval_relevance: Optional[float] = None
 
 
-langsmith_client = Client(
-    api_key=config.langsmith_api_key,
-    api_url=config.langsmith_api_url,
-)
+_langsmith_client: Optional[Client] = None
+_judge_llm: Optional[Any] = None
 
-judge_llm = LLMFactory.create_llm(provider=LLMProvider.DEEPSEEK)
-logger.info("Initialized DeepSeek judge LLM using LLMFactory")
+
+def get_langsmith_client() -> Client:
+    """Lazily build the LangSmith client.
+
+    Deferred out of import time so importing this module has no credential or
+    network side effects (keeps it importable in CI / unit tests).
+    """
+    global _langsmith_client
+    if _langsmith_client is None:
+        _langsmith_client = Client(
+            api_key=config.langsmith_api_key,
+            api_url=config.langsmith_api_url,
+        )
+    return _langsmith_client
+
+
+def get_judge_llm() -> Any:
+    """Lazily build the DeepSeek judge LLM.
+
+    The DeepSeek judge routes through OpenRouter, so construction needs
+    credentials; defer it out of import time so the module imports cleanly
+    without them (CI, unit tests).
+    """
+    global _judge_llm
+    if _judge_llm is None:
+        _judge_llm = LLMFactory.create_llm(provider=LLMProvider.DEEPSEEK)
+        logger.info("Initialized DeepSeek judge LLM using LLMFactory")
+    return _judge_llm
 
 
 def process_evaluation_task(eval_message: EvaluationMessage) -> None:
@@ -298,7 +323,7 @@ def process_evaluation_task(eval_message: EvaluationMessage) -> None:
         posted_count = 0
         for feedback in feedbacks_to_post:
             try:
-                langsmith_client.create_feedback(
+                get_langsmith_client().create_feedback(
                     run_id=run_id,
                     key=feedback.key,
                     score=feedback.score,
@@ -459,6 +484,21 @@ def run_heuristic_checks(response: str) -> HeuristicResult:
     )
 
 
+def _loads_judge_json(raw: str) -> dict:
+    """Parse a judge LLM's JSON reply, tolerating Markdown code fences.
+
+    Despite json_mode=True, DeepSeek sometimes wraps the object in a
+    ```json ... ``` block. A bare json.loads() then raises and the caller
+    silently falls back to a 0.5 score, corrupting the metric. Strip the
+    fences before parsing.
+    """
+    text = raw.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```[a-zA-Z0-9]*\n?", "", text)
+        text = re.sub(r"\n?```$", "", text.strip()).strip()
+    return json.loads(text)
+
+
 def evaluate_faithfulness(
     query: str, context: str, response: str
 ) -> FaithfulnessResult:
@@ -481,12 +521,12 @@ def evaluate_faithfulness(
         ),
     ]
 
-    result = judge_llm.chat(
+    result = get_judge_llm().chat(
         messages=messages, temperature=0.0, max_tokens=400, json_mode=True
     )
 
     try:
-        parsed = json.loads(result)
+        parsed = _loads_judge_json(result)
         return FaithfulnessResult(
             faithfulness=parsed.get("faithfulness", 0.5),
             grounded=parsed.get("grounded", False),
@@ -513,12 +553,12 @@ def evaluate_actionability_llm(query: str, response: str) -> ActionabilityResult
         ),
     ]
 
-    result = judge_llm.chat(
+    result = get_judge_llm().chat(
         messages=messages, temperature=0.0, max_tokens=300, json_mode=True
     )
 
     try:
-        parsed = json.loads(result)
+        parsed = _loads_judge_json(result)
         return ActionabilityResult(
             actionability=parsed.get("actionability", 0.5),
             specific_products_count=parsed.get("specific_products_count", 0),
@@ -559,12 +599,12 @@ def evaluate_retrieval_relevance(
         ),
     ]
 
-    result = judge_llm.chat(
+    result = get_judge_llm().chat(
         messages=messages, temperature=0.0, max_tokens=300, json_mode=True
     )
 
     try:
-        parsed = json.loads(result)
+        parsed = _loads_judge_json(result)
         return RetrievalRelevanceResult(
             avg_relevance=parsed.get("avg_relevance", 0.5),
             reasoning=parsed.get("reasoning", ""),
