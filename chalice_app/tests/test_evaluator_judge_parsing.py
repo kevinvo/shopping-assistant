@@ -8,7 +8,7 @@ the real score instead of the 0.5 fallback.
 """
 
 import json
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -51,13 +51,17 @@ def test_raises_on_garbage():
 # --------------------------------------------------------------------------- #
 @patch.object(ev, "get_actionability_user")
 @patch.object(ev, "get_actionability_system")
-@patch.object(ev, "judge_llm")
-def test_actionability_parses_fenced_response(mock_llm, mock_sys, mock_user):
+@patch.object(ev, "get_judge_llm")
+def test_actionability_parses_fenced_response(mock_get_llm, mock_sys, mock_user):
     mock_sys.return_value = ("system", None)
     mock_user.return_value = ("q={query} r={response}", None)
-    mock_llm.chat.return_value = (
-        '```json\n{"actionability": 0.95, "specific_products_count": 4,'
-        ' "reasoning": "specific"}\n```'
+    mock_get_llm.return_value = MagicMock(
+        chat=MagicMock(
+            return_value=(
+                '```json\n{"actionability": 0.95, "specific_products_count": 4,'
+                ' "reasoning": "specific"}\n```'
+            )
+        )
     )
 
     result = ev.evaluate_actionability_llm("best knife", "Get the Victorinox.")
@@ -68,12 +72,17 @@ def test_actionability_parses_fenced_response(mock_llm, mock_sys, mock_user):
 
 @patch.object(ev, "get_faithfulness_user")
 @patch.object(ev, "get_faithfulness_system")
-@patch.object(ev, "judge_llm")
-def test_faithfulness_parses_fenced_response(mock_llm, mock_sys, mock_user):
+@patch.object(ev, "get_judge_llm")
+def test_faithfulness_parses_fenced_response(mock_get_llm, mock_sys, mock_user):
     mock_sys.return_value = ("system", None)
     mock_user.return_value = ("q={query} c={context} r={response}", None)
-    mock_llm.chat.return_value = (
-        '```json\n{"faithfulness": 0.88, "grounded": true, "reasoning": "ok"}\n```'
+    mock_get_llm.return_value = MagicMock(
+        chat=MagicMock(
+            return_value=(
+                '```json\n{"faithfulness": 0.88, "grounded": true,'
+                ' "reasoning": "ok"}\n```'
+            )
+        )
     )
 
     result = ev.evaluate_faithfulness("q", "context", "response")
