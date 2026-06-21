@@ -111,13 +111,37 @@ class ScoresForComputation:
     retrieval_relevance: Optional[float] = None
 
 
-langsmith_client = Client(
-    api_key=config.langsmith_api_key,
-    api_url=config.langsmith_api_url,
-)
+_langsmith_client: Optional[Client] = None
+_judge_llm: Optional[Any] = None
 
-judge_llm = LLMFactory.create_llm(provider=LLMProvider.DEEPSEEK)
-logger.info("Initialized DeepSeek judge LLM using LLMFactory")
+
+def get_langsmith_client() -> Client:
+    """Lazily build the LangSmith client.
+
+    Deferred out of import time so importing this module has no credential or
+    network side effects (keeps it importable in CI / unit tests).
+    """
+    global _langsmith_client
+    if _langsmith_client is None:
+        _langsmith_client = Client(
+            api_key=config.langsmith_api_key,
+            api_url=config.langsmith_api_url,
+        )
+    return _langsmith_client
+
+
+def get_judge_llm() -> Any:
+    """Lazily build the DeepSeek judge LLM.
+
+    The DeepSeek judge routes through OpenRouter, so construction needs
+    credentials; defer it out of import time so the module imports cleanly
+    without them (CI, unit tests).
+    """
+    global _judge_llm
+    if _judge_llm is None:
+        _judge_llm = LLMFactory.create_llm(provider=LLMProvider.DEEPSEEK)
+        logger.info("Initialized DeepSeek judge LLM using LLMFactory")
+    return _judge_llm
 
 
 def process_evaluation_task(eval_message: EvaluationMessage) -> None:
@@ -299,7 +323,7 @@ def process_evaluation_task(eval_message: EvaluationMessage) -> None:
         posted_count = 0
         for feedback in feedbacks_to_post:
             try:
-                langsmith_client.create_feedback(
+                get_langsmith_client().create_feedback(
                     run_id=run_id,
                     key=feedback.key,
                     score=feedback.score,
@@ -497,7 +521,7 @@ def evaluate_faithfulness(
         ),
     ]
 
-    result = judge_llm.chat(
+    result = get_judge_llm().chat(
         messages=messages, temperature=0.0, max_tokens=400, json_mode=True
     )
 
@@ -529,7 +553,7 @@ def evaluate_actionability_llm(query: str, response: str) -> ActionabilityResult
         ),
     ]
 
-    result = judge_llm.chat(
+    result = get_judge_llm().chat(
         messages=messages, temperature=0.0, max_tokens=300, json_mode=True
     )
 
@@ -575,7 +599,7 @@ def evaluate_retrieval_relevance(
         ),
     ]
 
-    result = judge_llm.chat(
+    result = get_judge_llm().chat(
         messages=messages, temperature=0.0, max_tokens=300, json_mode=True
     )
 
