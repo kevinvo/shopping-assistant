@@ -33,11 +33,19 @@ eval/
    This calls `Chat.process_chat()` directly (real Qdrant + embeddings/LLM
    calls via your `.env`) and writes `captured/to_label.jsonl`.
 
-2. **Label** — annotate `captured/to_label.jsonl`, then distill into `gold/`.
-   (Phase 2 will add a helper; for now edit by hand — see schemas below.)
+2. **Label** — interactive helper writes the `gold/` files directly:
+   ```
+   python -m scripts.eval_label --limit 5      # label the first 5 cases
+   python -m scripts.eval_label --ids curated-001,curated-014
+   ```
+   Per doc: `y`=relevant, `n`=not, `s`=skip, `q`=save & quit. It also asks for
+   expected product keywords, should-clarify, and your faithfulness /
+   actionability scores. Resumable — already-labeled items are skipped. You stay
+   the sole author of every label (the dataset's value is human ground truth).
 
-3. **Score** — (Phase 2) `python -m scripts.eval_score` reads `gold/` and
-   reports true recall@k / nDCG@k, response metrics, and judge agreement.
+3. **Score** — `python -m scripts.eval_score` reads `gold/` and reports true
+   recall@k / nDCG@k vs the reranker baseline, response metrics, and judge
+   agreement (`--no-judge` to skip the live judge LLM calls).
 
 ## Schemas
 
