@@ -27,6 +27,12 @@ engineering backlog — the ⚠️ items there are listed here as concrete tasks
 - [ ] **Validate the LLM-as-judge against human labels** (Q8 ⚠️)
       Calibrate `evaluator.py` judge scores against the labeled set above.
       Confirm which model judges (likely `deepseek-chat:nitro`).
+- [ ] **BUG: judge JSON parse fails on code-fenced output** (found via eval scorer, 2026-06-21)
+      `evaluate_actionability_llm` (and faithfulness/retrieval) receive
+      ```json-fenced responses from DeepSeek, `json.loads` throws, and they
+      silently fall back to 0.5 — corrupting judge scores in production today.
+      Fix: strip code fences before parsing (`evaluator.py` :495, :527, :572) +
+      regression test.
 - [ ] **Run a HyDE ablation** (Q10 ⚠️)
       Measure retrieval lift (with vs without HyDE) using existing
       `retrieval_relevance` + `recall_at_k` / `ndcg_at_k` signals.
