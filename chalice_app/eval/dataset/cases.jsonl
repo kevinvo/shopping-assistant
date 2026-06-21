@@ -1,0 +1,25 @@
+{"id": "curated-001", "source": "curated", "turns": ["best running shoes for flat feet"], "tags": ["single-turn", "direct"]}
+{"id": "curated-002", "source": "curated", "turns": ["good insulated travel mug recommendations"], "tags": ["single-turn", "direct"]}
+{"id": "curated-003", "source": "curated", "turns": ["indoor plants for low light apartment"], "tags": ["single-turn", "direct"]}
+{"id": "curated-004", "source": "curated", "turns": ["durable cookware brands for everyday use"], "tags": ["single-turn", "direct"]}
+{"id": "curated-005", "source": "curated", "turns": ["best wireless headphones with noise cancellation under $300"], "tags": ["single-turn", "direct"]}
+{"id": "curated-006", "source": "curated", "turns": ["recommend a backpack for daily commute under $100"], "tags": ["single-turn", "direct"]}
+{"id": "curated-007", "source": "curated", "turns": ["what coffee maker should I get for a small office"], "tags": ["single-turn", "direct"]}
+{"id": "curated-008", "source": "curated", "turns": ["best ergonomic office chair under $500"], "tags": ["single-turn", "direct"]}
+{"id": "curated-009", "source": "curated", "turns": ["best chef's knife under $200"], "tags": ["single-turn", "direct"]}
+{"id": "curated-010", "source": "curated", "turns": ["best electric kettle for everyday tea"], "tags": ["single-turn", "direct"]}
+{"id": "curated-011", "source": "curated", "turns": ["All-Clad vs Le Creuset for stainless cookware"], "tags": ["single-turn", "comparison"]}
+{"id": "curated-012", "source": "curated", "turns": ["Sony WH-1000XM5 vs Bose QuietComfort 45"], "tags": ["single-turn", "comparison"]}
+{"id": "curated-013", "source": "curated", "turns": ["MacBook Air vs ThinkPad for college"], "tags": ["single-turn", "comparison"]}
+{"id": "curated-014", "source": "curated", "turns": ["I need a gift"], "tags": ["single-turn", "vague", "clarify-expected"]}
+{"id": "curated-015", "source": "curated", "turns": ["I want to start cooking more"], "tags": ["single-turn", "vague", "clarify-expected"]}
+{"id": "curated-016", "source": "curated", "turns": ["birthday gift ideas for my girlfriend", "tell me about backpacks"], "tags": ["multi-turn", "topic-shift"]}
+{"id": "curated-017", "source": "curated", "turns": ["best running shoes for flat feet", "i need a new laptop for college"], "tags": ["multi-turn", "topic-shift"]}
+{"id": "curated-018", "source": "curated", "turns": ["how to clean a cast iron pan", "what coffee makers do you recommend"], "tags": ["multi-turn", "topic-shift"]}
+{"id": "curated-019", "source": "curated", "turns": ["BIFL kitchen scale recommendation"], "tags": ["single-turn", "niche"]}
+{"id": "curated-020", "source": "curated", "turns": ["best men's winter coat under $300"], "tags": ["single-turn", "niche"]}
+{"id": "curated-021", "source": "curated", "turns": ["good board games for adults"], "tags": ["single-turn", "niche"]}
+{"id": "curated-022", "source": "curated", "turns": ["best vacuum for pet hair"], "tags": ["single-turn", "niche"]}
+{"id": "curated-023", "source": "curated", "turns": ["winter tires for daily commute in cold climate"], "tags": ["single-turn", "niche"]}
+{"id": "curated-024", "source": "curated", "turns": ["good shovel for clay soil"], "tags": ["single-turn", "niche"]}
+{"id": "curated-025", "source": "curated", "turns": ["best gaming laptop under $1500"], "tags": ["single-turn", "niche"]}
