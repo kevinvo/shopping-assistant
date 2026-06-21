@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any, List, Optional
 
@@ -459,6 +460,21 @@ def run_heuristic_checks(response: str) -> HeuristicResult:
     )
 
 
+def _loads_judge_json(raw: str) -> dict:
+    """Parse a judge LLM's JSON reply, tolerating Markdown code fences.
+
+    Despite json_mode=True, DeepSeek sometimes wraps the object in a
+    ```json ... ``` block. A bare json.loads() then raises and the caller
+    silently falls back to a 0.5 score, corrupting the metric. Strip the
+    fences before parsing.
+    """
+    text = raw.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```[a-zA-Z0-9]*\n?", "", text)
+        text = re.sub(r"\n?```$", "", text.strip()).strip()
+    return json.loads(text)
+
+
 def evaluate_faithfulness(
     query: str, context: str, response: str
 ) -> FaithfulnessResult:
@@ -486,7 +502,7 @@ def evaluate_faithfulness(
     )
 
     try:
-        parsed = json.loads(result)
+        parsed = _loads_judge_json(result)
         return FaithfulnessResult(
             faithfulness=parsed.get("faithfulness", 0.5),
             grounded=parsed.get("grounded", False),
@@ -518,7 +534,7 @@ def evaluate_actionability_llm(query: str, response: str) -> ActionabilityResult
     )
 
     try:
-        parsed = json.loads(result)
+        parsed = _loads_judge_json(result)
         return ActionabilityResult(
             actionability=parsed.get("actionability", 0.5),
             specific_products_count=parsed.get("specific_products_count", 0),
@@ -564,7 +580,7 @@ def evaluate_retrieval_relevance(
     )
 
     try:
-        parsed = json.loads(result)
+        parsed = _loads_judge_json(result)
         return RetrievalRelevanceResult(
             avg_relevance=parsed.get("avg_relevance", 0.5),
             reasoning=parsed.get("reasoning", ""),
